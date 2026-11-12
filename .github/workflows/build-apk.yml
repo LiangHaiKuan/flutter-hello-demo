@@ -30,6 +30,12 @@ jobs:
       - name: 查看版本
         run: flutter --version
 
+      - name: 生成安卓工程（与当前 Flutter 版本匹配）
+        run: flutter create --platforms=android --org com.lhk --project-name hello_demo .
+
+      - name: 设置 APP 显示名
+        run: sed -i 's/android:label="hello_demo"/android:label="你好Demo"/' android/app/src/main/AndroidManifest.xml
+
       - name: 拉取依赖
         run: flutter pub get
 
