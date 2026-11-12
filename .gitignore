@@ -1,0 +1,23 @@
+# Flutter 生成/编译产物
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+
+# Android 本地配置（含本机 Flutter 路径，绝不能提交）
+android/local.properties
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+android/key.properties
+*.jks
+*.keystore
+
+# 系统垃圾
+.DS_Store
+Thumbs.db
