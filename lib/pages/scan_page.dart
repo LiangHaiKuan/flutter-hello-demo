@@ -88,12 +88,14 @@ class _ScanPageState extends State<ScanPage> {
                 if (v == 'filter') _showFilterSettings();
                 if (v == 'conn') _showConnectSettings();
                 if (v == 'peripheral') _openPeripheralMode();
+                if (v == 'log') FloatingLog.instance.toggle(context);
               },
               itemBuilder: (_) => const [
                 PopupMenuItem(value: 'scan', child: Text('扫描设置')),
                 PopupMenuItem(value: 'filter', child: Text('过滤设置')),
                 PopupMenuItem(value: 'conn', child: Text('连接设置')),
                 PopupMenuItem(value: 'peripheral', child: Text('外围模式')),
+                PopupMenuItem(value: 'log', child: Text('悬浮日志')),
               ],
             ),
           ],

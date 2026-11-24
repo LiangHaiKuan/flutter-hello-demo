@@ -32,6 +32,9 @@ class DeviceSession {
   /// 通知开启状态记录 charUuidStr -> bool
   final Map<String, bool> notifyState = {};
 
+  /// 通知状态变化计数（铃铛图标即时点亮/熄灭用）
+  final ValueNotifier<int> notifyBump = ValueNotifier(0);
+
   /// 发送历史（最新在前）
   final ValueNotifier<List<String>> writeHistory = ValueNotifier([]);
 

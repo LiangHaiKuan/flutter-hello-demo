@@ -11,6 +11,7 @@ import 'package:share_plus/share_plus.dart';
 import '../core/ble_util.dart';
 import '../models/models.dart';
 import '../services/ble_engine.dart';
+import '../widgets/log_floating.dart';
 import 'fast_cmd_page.dart';
 import 'knowledge_page.dart';
 

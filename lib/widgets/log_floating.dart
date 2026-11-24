@@ -85,7 +85,7 @@ class _FloatingLogWindowState extends State<_FloatingLogWindow> {
               GestureDetector(
                 onPanUpdate: _max
                     ? null
-                    : (d) => setState(() => _pos += d),
+                    : (d) => setState(() => _pos += d.delta),
                 child: Container(
                   height: _barH,
                   decoration: const BoxDecoration(

@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 import '../core/ble_util.dart';
 import '../models/models.dart';
 import '../services/ble_engine.dart';
+import '../widgets/log_floating.dart';
 
 /// 外围模式：手机当 BLE 从机（广播 + GATT 服务器）
 ///
