@@ -1610,15 +1610,6 @@ class _LogLine extends StatelessWidget {
     return sb.toString();
   }
 
-  String _formatRaw(LogEntry e) => format(
-        e,
-        codec,
-        showTime: BleEngine.instance.logShowTime,
-        showTag: BleEngine.instance.logShowTag,
-        showDir: BleEngine.instance.logShowDir,
-        showQuote: BleEngine.instance.logShowQuote,
-      );
-
   @override
   Widget build(BuildContext context) {
     final e = entry;

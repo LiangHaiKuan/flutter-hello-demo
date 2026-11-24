@@ -11,7 +11,7 @@ import 'dart:io';
 ///   服务端把 patch 应用到当前内容后做 DJB2 哈希校验（h = 新内容哈希）；
 /// - 全量覆盖 = 读取当前内容 → 用一行 patch 替换全部行 → save。
 class NotepadClient {
-  NotepadClient._();
+  NotepadClient();
 
   WebSocket? _ws;
   int _ackId = 0;

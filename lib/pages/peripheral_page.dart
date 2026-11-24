@@ -101,8 +101,10 @@ class PeripheralManager {
     // 中央写入 → 日志 + 回复规则 / 被写入响应
     BlePeripheral.setWriteRequestCallback(
         (deviceId, characteristicId, offset, value) {
-      _logData(value, false);
-      _onWritten(value);
+      if (value != null) {
+        _logData(value, false);
+        _onWritten(value);
+      }
       return null; // 自动 ACK
     });
 
