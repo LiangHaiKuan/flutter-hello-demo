@@ -1,13 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../services/ble_engine.dart';
+import 'knowledge_page.dart';
 
-/// 广播数据页（对标原版）：RSSI 曲线图 + 原始数据复制 + LEN/TYPE/VALUE 解析表
+/// 广播数据页（对标原版）：RSSI 曲线图 + 原始数据复制 + LEN/TYPE/VALUE 解析表 + 字符串翻译表
 ///
 /// 注：flutter_blue_plus 1.35 的 AdvertisementData 不带原始字节，
-/// 表格和"原始数据"由结构化字段（flags/txPower/appearance/uuids/serviceData/厂商数据）重组。
+/// 表格和"原始数据"由结构化字段（txPower/appearance/uuids/serviceData/厂商数据）重组。
+///
+/// v1.2：进页后 RSSI 持续更新（自动扫描 / 已连接设备走 readRssi）。
 class AdvDataPage extends StatefulWidget {
   final String mac;
   final String name;
@@ -19,6 +24,47 @@ class AdvDataPage extends StatefulWidget {
 
 class _AdvDataPageState extends State<AdvDataPage> {
   final BleEngine _engine = BleEngine.instance;
+  Timer? _uiTimer;
+  VoidCallback? _rssiListener;
+  DeviceSession? _session;
+
+  @override
+  void initState() {
+    super.initState();
+    _session = _engine.sessionOf(widget.mac);
+    // 1 秒刷新一次曲线（数据源：扫描广播 / 已连接设备 readRssi）
+    _uiTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+    if (_session != null && _session!.isConnected) {
+      // 已连接设备：把 readRssi 的值也记进曲线历史
+      _rssiListener = () {
+        final v = _session!.rssi.value;
+        if (v > 0) {
+          final h = _engine.rssiHistory.putIfAbsent(widget.mac, () => []);
+          h.add(v);
+          if (h.length > 300) h.removeRange(0, h.length - 300);
+        }
+      };
+      _session!.rssi.addListener(_rssiListener!);
+    } else if (!_engine.scanning.value) {
+      // 页面里要持续画 RSSI 曲线：没在扫描就静默开启（离开页面不主动停，保持数据流）
+      FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: 60),
+        continuousUpdates: true,
+        continuousDivisor: 1,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _uiTimer?.cancel();
+    if (_session != null && _rssiListener != null) {
+      _session!.rssi.removeListener(_rssiListener!);
+    }
+    super.dispose();
+  }
 
   /// 从结构化字段组装等效的广播数据字节流（AD 结构）
   List<int> _assembleRaw(AdvertisementData? adv) {
@@ -31,7 +77,6 @@ class _AdvDataPageState extends State<AdvDataPage> {
       out.addAll(value);
     }
 
-    // Connectable 标志（原版第一行 0x01/0x06 的 flags 这里用等效呈现）
     addStruct(0x0A, [adv.txPowerLevel != null ? adv.txPowerLevel! & 0xFF : 0]);
     if (adv.appearance != null && adv.appearance != 0) {
       final a = adv.appearance!;
@@ -128,6 +173,21 @@ class _AdvDataPageState extends State<AdvDataPage> {
         leading: BackButton(onPressed: () => Navigator.of(context).pop()),
         title: Text('广播数据(${widget.name})',
             style: const TextStyle(fontSize: 17)),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'kb') {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const KnowledgePage(section: 'adv')));
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'kb', child: Text('广播包科普')),
+            ],
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(12),
@@ -141,7 +201,8 @@ class _AdvDataPageState extends State<AdvDataPage> {
               children: [
                 Icon(Icons.show_chart, color: Color(0xFFF57C00), size: 16),
                 SizedBox(width: 4),
-                Text('信号强度', style: TextStyle(fontSize: 12)),
+                Text('信号强度（持续更新中）',
+                    style: TextStyle(fontSize: 12)),
               ],
             ),
           ),
@@ -184,6 +245,16 @@ class _AdvDataPageState extends State<AdvDataPage> {
               style: TextStyle(fontSize: 14, color: Colors.black54)),
           const SizedBox(height: 6),
           _buildTableWidget(adv),
+          const SizedBox(height: 16),
+          // ---------- 字符串翻译表（可打印字符绿色显示） ----------
+          const Text('字符串翻译视图:',
+              style: TextStyle(fontSize: 14, color: Colors.black54)),
+          const SizedBox(height: 2),
+          const Text('可打印字符（0~9、a~Z、常用标点）翻译成字符用绿色显示，'
+                  '无法翻译的字节保持黑色十六进制',
+              style: TextStyle(fontSize: 11, color: Colors.grey)),
+          const SizedBox(height: 6),
+          _buildTranslateTable(adv),
         ],
       ),
     );
@@ -207,23 +278,7 @@ class _AdvDataPageState extends State<AdvDataPage> {
         2: FlexColumnWidth(4),
       },
       children: [
-        const TableRow(
-          decoration: BoxDecoration(color: Color(0xFFF5F5F5)),
-          children: [
-            Padding(
-                padding: EdgeInsets.all(6),
-                child: Text('LEN',
-                    style: TextStyle(fontSize: 13, color: Colors.orange))),
-            Padding(
-                padding: EdgeInsets.all(6),
-                child: Text('TYPE',
-                    style: TextStyle(fontSize: 13, color: Colors.orange))),
-            Padding(
-                padding: EdgeInsets.all(6),
-                child: Text('VALUE',
-                    style: TextStyle(fontSize: 13, color: Colors.orange))),
-          ],
-        ),
+        _headerRow(),
         for (final r in rows)
           TableRow(
             children: [
@@ -251,6 +306,95 @@ class _AdvDataPageState extends State<AdvDataPage> {
             ],
           ),
       ],
+    );
+  }
+
+  /// 字符串翻译表：VALUE 里可打印 ASCII 用绿色字符显示
+  Widget _buildTranslateTable(AdvertisementData? adv) {
+    final rows = _buildTable(adv);
+    if (rows.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(12),
+        child: Text('暂无广播数据',
+            style: TextStyle(color: Colors.grey, fontSize: 13)),
+      );
+    }
+    return Table(
+      border: TableBorder.all(color: Colors.grey.shade400, width: 0.5),
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      columnWidths: const {
+        0: FlexColumnWidth(1),
+        1: FlexColumnWidth(1.4),
+        2: FlexColumnWidth(4),
+      },
+      children: [
+        _headerRow('VALUE (翻译)'),
+        for (final r in rows)
+          TableRow(
+            children: [
+              Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Text('${r.len}',
+                      style: const TextStyle(fontSize: 13))),
+              Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Text('0x${r.type.toRadixString(16).padLeft(2, '0')}',
+                      style: const TextStyle(fontSize: 13))),
+              Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Wrap(
+                    spacing: 3,
+                    runSpacing: 3,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      for (final b in r.value) _translatedByte(b),
+                    ],
+                  )),
+            ],
+          ),
+      ],
+    );
+  }
+
+  TableRow _headerRow([String valueTitle = 'VALUE']) {
+    return TableRow(
+      decoration: const BoxDecoration(color: Color(0xFFF5F5F5)),
+      children: [
+        const Padding(
+            padding: EdgeInsets.all(6),
+            child: Text('LEN',
+                style: TextStyle(fontSize: 13, color: Colors.orange))),
+        const Padding(
+            padding: EdgeInsets.all(6),
+            child: Text('TYPE',
+                style: TextStyle(fontSize: 13, color: Colors.orange))),
+        Padding(
+            padding: const EdgeInsets.all(6),
+            child: Text(valueTitle,
+                style: const TextStyle(fontSize: 13, color: Colors.orange))),
+      ],
+    );
+  }
+
+  /// 单字节翻译：可打印 ASCII（0x20~0x7E）→ 绿色字符；否则黑色 hex
+  Widget _translatedByte(int b) {
+    final printable = b >= 0x20 && b <= 0x7E;
+    if (printable) {
+      return Text(
+        String.fromCharCode(b),
+        style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF2E7D32), // 绿色
+            fontFamily: 'monospace'),
+      );
+    }
+    return Text(
+      b.toRadixString(16).padLeft(2, '0').toUpperCase(),
+      style: const TextStyle(
+          fontSize: 13,
+          color: Colors.black87,
+          fontFamily: 'monospace'),
     );
   }
 
@@ -295,7 +439,7 @@ class _RssiPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    const top = -32.0, bottom = -52.0;
+    const top = -32.0, bottom = -100.0;
     const padL = 36.0, padR = 36.0, padT = 8.0, padB = 16.0;
     final chartW = size.width - padL - padR;
     final chartH = size.height - padT - padB;
@@ -313,13 +457,13 @@ class _RssiPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     final textStyle = TextStyle(fontSize: 10, color: Colors.grey.shade600);
 
-    // 纵轴：-32 到 -52，每 4dBm 一格（超出范围自适应钳制）
-    for (var v = top; v >= bottom; v -= 4) {
+    // 纵轴：-100 到 -30，每 10dBm 一格（更通用）
+    for (var v = -30; v >= bottom; v -= 10) {
       final y = padT + (top - v) / (top - bottom) * chartH;
       canvas.drawLine(
           Offset(padL, y), Offset(size.width - padR, y), gridPaint);
       final tp = TextPainter(
-        text: TextSpan(text: '${v.toInt()}', style: textStyle),
+        text: TextSpan(text: '$v', style: textStyle),
         textDirection: TextDirection.ltr,
       )..layout();
       tp.paint(canvas, Offset(padL - tp.width - 4, y - tp.height / 2));

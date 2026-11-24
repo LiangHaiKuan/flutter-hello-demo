@@ -8,7 +8,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/ble_util.dart';
 import '../models/models.dart';
 
-/// 每台已连接设备的会话状态
+/// 每台设备的会话状态
+///
+/// v1.2 起：断开后会话【保留】，界面变灰并可一键回连；
+/// 只有 app 退出才清理。连接失败也不再移除会话（修复第一次连接失败进不去页面的问题）。
 class DeviceSession {
   final BluetoothDevice device;
   final ValueNotifier<BluetoothConnectionState> state =
@@ -18,6 +21,9 @@ class DeviceSession {
 
   /// 服务树（发现服务后填充）
   List<BluetoothService> services = [];
+
+  /// 用户展开的服务（记忆展开状态：返回本页时保持）
+  final Set<String> expandedServices = {};
 
   /// 当前发送目标特征
   final ValueNotifier<BluetoothCharacteristic?> targetChar =
@@ -33,10 +39,17 @@ class DeviceSession {
   int recvPkts = 0, recvBytes = 0;
   int sentOkPkts = 0, sentOkBytes = 0;
   int sentFailPkts = 0, sentFailBytes = 0;
-  final ValueNotifier<int> statsBump = ValueNotifier(0); // 触发界面刷新
+  final ValueNotifier<int> statsBump = ValueNotifier(0);
+
+  /// 当前 MTU（连接成功后请求 512）
+  int mtu = 0;
+
+  /// 用户手动断开（不触发自动回连）
+  bool manualDisconnect = false;
 
   StreamSubscription? _connSub;
   Timer? _rssiTimer;
+  Timer? _reconnectTimer;
   final Map<String, StreamSubscription> _notifySubs = {};
 
   DeviceSession(this.device) {
@@ -46,8 +59,22 @@ class DeviceSession {
   String get mac => device.remoteId.str;
   String get name => device.platformName.isNotEmpty ? device.platformName : '未知设备';
 
-  Future<void> init() async {
-    await device.connect(timeout: const Duration(seconds: 15), autoConnect: false);
+  bool get isConnected =>
+      state.value == BluetoothConnectionState.connected;
+
+  /// 首次连接 / 回连入口
+  Future<void> connectNow() async {
+    manualDisconnect = false;
+    _reconnectTimer?.cancel();
+    state.value = BluetoothConnectionState.connecting;
+    try {
+      await device.connect(
+          timeout: const Duration(seconds: 15), autoConnect: false);
+    } catch (e) {
+      // 连接失败：保留会话，页面显示"未连接"，可点回连
+      state.value = BluetoothConnectionState.disconnected;
+      BleEngine.instance.logEvent(mac, '连接失败: $e');
+    }
   }
 
   void _onConnState(BluetoothConnectionState s) {
@@ -60,14 +87,24 @@ class DeviceSession {
   }
 
   Future<void> _afterConnected() async {
+    _reconnectTimer?.cancel();
+    manualDisconnect = false;
     BleEngine.instance.logEvent(mac, '连接成功，等待发现服务');
     try {
+      // 先请求大 MTU（安卓），提升单包发送长度
+      try {
+        final m = await device.requestMtu(512);
+        mtu = m;
+        BleEngine.instance.logEvent(mac, 'MTU 协商为 $m');
+      } catch (_) {
+        try {
+          mtu = device.mtuNow;
+        } catch (_) {}
+      }
       services = await device.discoverServices();
       servicesReady.value = true;
       BleEngine.instance.logEvent(mac, '连接成功，并成功发现服务');
-      // 默认发送目标：第一个可写特征
       targetChar.value ??= _firstWritable();
-      // RSSI 定时刷新
       _rssiTimer?.cancel();
       _rssiTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
         try {
@@ -96,12 +133,47 @@ class DeviceSession {
       sub.cancel();
     }
     _notifySubs.clear();
-    BleEngine.instance.logEvent(mac, '连接已断开');
-    BleEngine.instance.removeSession(this);
+    servicesReady.value = false;
+    if (manualDisconnect) {
+      BleEngine.instance.logEvent(mac, '已断开连接');
+    } else {
+      BleEngine.instance.logEvent(mac, '连接已断开');
+      // 自动回连（扫描页"连接设置"里开启后生效）
+      if (BleEngine.instance.autoReconnect) {
+        _scheduleReconnect();
+      }
+    }
+    // 注意：不移除会话。界面变灰 + 回连按钮。
   }
 
+  void _scheduleReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (manualDisconnect ||
+          !BleEngine.instance.autoReconnect ||
+          state.value == BluetoothConnectionState.connected ||
+          state.value == BluetoothConnectionState.connecting) {
+        _reconnectTimer?.cancel();
+        return;
+      }
+      BleEngine.instance.logEvent(mac, '自动回连中...');
+      connectNow();
+    });
+  }
+
+  void cancelReconnect() {
+    _reconnectTimer?.cancel();
+  }
+
+  /// 用户手动断开
   Future<void> disconnect() async {
-    await device.disconnect();
+    manualDisconnect = true;
+    _reconnectTimer?.cancel();
+    try {
+      await device.disconnect();
+    } catch (_) {
+      state.value = BluetoothConnectionState.disconnected;
+    }
   }
 
   /// 统计清零
@@ -184,6 +256,7 @@ class DeviceSession {
 
   void dispose() {
     _rssiTimer?.cancel();
+    _reconnectTimer?.cancel();
     _connSub?.cancel();
     for (final sub in _notifySubs.values) {
       sub.cancel();
@@ -216,7 +289,7 @@ class BleEngine {
   /// 过滤条件变化时 +1，通知扫描页重算
   final ValueNotifier<int> filterBump = ValueNotifier(0);
 
-  /// 会话，key = mac
+  /// 会话，key = mac（断开后保留，支持回连）
   final Map<String, DeviceSession> sessions = {};
   final ValueNotifier<int> sessionsBump = ValueNotifier(0);
 
@@ -233,6 +306,33 @@ class BleEngine {
 
   bool loopScan = false;
   int scanPeriodSec = 10;
+
+  /// 断线自动回连（设备断电重上电后自动重连）
+  bool autoReconnect = false;
+
+  Future<void> loadSettings() async {
+    final sp = await SharedPreferences.getInstance();
+    autoReconnect = sp.getBool('auto_reconnect') ?? false;
+    loadCmds();
+  }
+
+  Future<void> setAutoReconnect(bool v) async {
+    autoReconnect = v;
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool('auto_reconnect', v);
+    if (!v) {
+      for (final s in sessions.values) {
+        s.cancelReconnect();
+      }
+    } else {
+      // 已断开且非手动断开的会话，立即开始回连
+      for (final s in sessions.values) {
+        if (!s.isConnected && !s.manualDisconnect) {
+          s.connectNow();
+        }
+      }
+    }
+  }
 
   // ---- 自定义按键持久化 ----
   List<FastCmd> cmds = [];
@@ -339,18 +439,18 @@ class BleEngine {
   // ---- 连接 ----
   DeviceSession? sessionOf(String mac) => sessions[mac];
 
+  /// 连接（已存在会话则回连）
   Future<void> connect(BluetoothDevice device) async {
     final mac = device.remoteId.str;
-    if (sessions.containsKey(mac)) return;
+    final existing = sessions[mac];
+    if (existing != null) {
+      await existing.connectNow();
+      return;
+    }
     final s = DeviceSession(device);
     sessions[mac] = s;
     sessionsBump.value++;
-    try {
-      await s.init();
-    } catch (e) {
-      logEvent(mac, '连接失败: $e');
-      removeSession(s);
-    }
+    await s.connectNow();
   }
 
   void removeSession(DeviceSession s) {

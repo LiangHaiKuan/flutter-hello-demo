@@ -266,13 +266,6 @@ class _FastCmdPageState extends State<FastCmdPage> {
         actions: [
           IconButton(
               icon: const Icon(Icons.add), tooltip: '添加', onPressed: _editCmd),
-          // 导入按钮常驻（修复：进入编辑模式后找不到导入入口的问题）
-          TextButton(
-              onPressed: _showImportSheet,
-              child: const Text('导入', style: TextStyle(color: Colors.white))),
-          TextButton(
-              onPressed: _exportCmds,
-              child: const Text('导出', style: TextStyle(color: Colors.white))),
           TextButton(
               onPressed: () {
                 setState(() => _editMode = !_editMode);
@@ -287,9 +280,31 @@ class _FastCmdPageState extends State<FastCmdPage> {
         builder: (_, __, ___) {
           final cmds = _engine.cmds;
           if (cmds.isEmpty) {
-            return const Center(
-                child: Text('还没有命令，点右上角 + 添加',
-                    style: TextStyle(color: Colors.grey)));
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('还没有命令',
+                      style: TextStyle(color: Colors.grey)),
+                  const SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFF57C00),
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _showImportSheet,
+                    icon: const Icon(Icons.file_open),
+                    label: const Text('导入指令（txt 文件 / 剪贴板）'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: _editCmd,
+                    icon: const Icon(Icons.add),
+                    label: const Text('手动添加一条'),
+                  ),
+                ],
+              ),
+            );
           }
           return Column(
             children: [
@@ -298,100 +313,119 @@ class _FastCmdPageState extends State<FastCmdPage> {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    '操作提示：单击修改；长按将数据填入发送输入框',
+                    '操作提示：单击修改；长按拖动调整顺序；长按数据文字可复制',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),
               ),
               Expanded(
-                child: ListView.builder(
+                // ReorderableListView：长按拖动调整顺序
+                child: ReorderableListView.builder(
                   itemCount: cmds.length,
+                  onReorder: (oldI, newI) async {
+                    setState(() {
+                      if (newI > oldI) newI--;
+                      final c = cmds.removeAt(oldI);
+                      cmds.insert(newI, c);
+                      for (var i = 0; i < cmds.length; i++) {
+                        cmds[i].order = i;
+                      }
+                    });
+                    await _engine.saveCmds();
+                    _engine.cmdsBump.value++;
+                  },
                   itemBuilder: (_, i) {
                     final c = cmds[i];
                     final selected = _selected.contains(c.id);
-                    return GestureDetector(
-                      onLongPress: () {
-                        Clipboard.setData(ClipboardData(
-                            text: c.hexMode
-                                ? c.data.toUpperCase().replaceAll(' ', '')
-                                : c.data));
-                        _toast('数据已复制，可粘贴到发送输入框');
-                      },
-                      child: Card(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 4),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 8),
-                          child: Row(
-                            children: [
-                              Checkbox(
-                                value: selected,
-                                onChanged: (v) => setState(() {
-                                  if (v == true) {
-                                    _selected.add(c.id);
-                                  } else {
-                                    _selected.remove(c.id);
-                                  }
-                                }),
+                    return Card(
+                      key: ValueKey(c.id),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 8),
+                        child: Row(
+                          children: [
+                            Checkbox(
+                              value: selected,
+                              onChanged: (v) => setState(() {
+                                if (v == true) {
+                                  _selected.add(c.id);
+                                } else {
+                                  _selected.remove(c.id);
+                                }
+                              }),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF57C00),
+                                borderRadius: BorderRadius.circular(4),
                               ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF57C00),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  c.hexMode ? 'hex' : 'ascii',
-                                  style: const TextStyle(
-                                      color: Colors.white, fontSize: 10),
-                                ),
+                              child: Text(
+                                c.hexMode ? 'hex' : 'ascii',
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 10),
                               ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: InkWell(
-                                  onTap: () => _editMode
-                                      ? null
-                                      : _editCmd(c),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(c.name,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w600)),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        '数据: ${c.preview()}',
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: InkWell(
+                                onTap: () => _editMode
+                                    ? null
+                                    : _editCmd(c),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(c.name,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.grey,
-                                            fontFamily: 'monospace'),
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w600)),
+                                    const SizedBox(height: 2),
+                                    InkWell(
+                                      onLongPress: () {
+                                        Clipboard.setData(ClipboardData(
+                                            text: c.hexMode
+                                                ? c.data
+                                                    .toUpperCase()
+                                                    .replaceAll(' ', '')
+                                                : c.data));
+                                        _toast('数据已复制，可粘贴到发送输入框');
+                                      },
+                                      child: Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Text(
+                                          '数据: ${c.preview()}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey,
+                                              fontFamily: 'monospace'),
+                                        ),
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              if (!_editMode)
-                                ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor:
-                                        const Color(0xFFF57C00),
-                                    foregroundColor: Colors.white,
-                                    minimumSize: const Size(52, 32),
-                                  ),
-                                  onPressed: () => _sendCmd(c),
-                                  child: const Text('发送',
-                                      style: TextStyle(fontSize: 13)),
+                            ),
+                            if (!_editMode)
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor:
+                                      const Color(0xFFF57C00),
+                                  foregroundColor: Colors.white,
+                                  minimumSize: const Size(52, 32),
                                 ),
-                            ],
-                          ),
+                                onPressed: () => _sendCmd(c),
+                                child: const Text('发送',
+                                    style: TextStyle(fontSize: 13)),
+                              ),
+                          ],
                         ),
                       ),
                     );
@@ -402,6 +436,7 @@ class _FastCmdPageState extends State<FastCmdPage> {
           );
         },
       ),
+      // 底部常驻按钮：导入/导出随时可点（不管是否在编辑模式）
       bottomNavigationBar: _editMode
           ? Container(
               color: Colors.white,
@@ -427,7 +462,36 @@ class _FastCmdPageState extends State<FastCmdPage> {
                 ],
               ),
             )
-          : null,
+          : Container(
+              color: Colors.white,
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).padding.bottom + 8,
+                  top: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFF57C00),
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _showImportSheet,
+                    icon: const Icon(Icons.file_open, size: 18),
+                    label: const Text('导入'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _exportCmds,
+                    icon: const Icon(Icons.save_alt, size: 18),
+                    label: const Text('导出'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => _editCmd(),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('添加'),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 }

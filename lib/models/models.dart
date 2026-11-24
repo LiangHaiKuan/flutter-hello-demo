@@ -22,7 +22,7 @@ class LogEntry {
       '${time.second.toString().padLeft(2, '0')}.'
       '${time.millisecond.toString().padLeft(3, '0')}';
 
-  /// 日志行显示的方向文字
+  /// 日志行显示的方向文字（对标原版：成功写入 / Notify / 读取）
   String get dirStr {
     switch (dir) {
       case LogDir.notify:
@@ -30,11 +30,11 @@ class LogEntry {
       case LogDir.indicate:
         return 'Indicate:';
       case LogDir.sendOk:
-        return '发送';
+        return '成功写入:';
       case LogDir.sendFail:
-        return '发送失败';
+        return '写入失败:';
       case LogDir.read:
-        return 'Read:';
+        return '读取:';
       case LogDir.event:
         return message ?? '';
     }
