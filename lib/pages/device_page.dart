@@ -157,8 +157,7 @@ class _DevicePageState extends State<DevicePage> {
     final writable = <BluetoothCharacteristic>[];
     for (final s in session.services) {
       for (final c in s.characteristics) {
-        if (c.properties.contains(Property.write) ||
-            c.properties.contains(Property.writeWithoutResponse)) {
+        if (c.properties.write || c.properties.writeWithoutResponse) {
           writable.add(c);
         }
       }
@@ -421,7 +420,7 @@ class _DevicePageState extends State<DevicePage> {
                       builder: (_, c, __) => Text(
                         c == null
                             ? '未选特征'
-                            : '${shortUuid(c.uuid.str)}(${c.properties.contains(Property.writeWithoutResponse) ? '无响应' : '默认'})',
+                            : '${shortUuid(c.uuid.str)}(${c.properties.writeWithoutResponse ? '无响应' : '默认'})',
                         style: const TextStyle(fontSize: 12),
                       ),
                     ),
@@ -566,6 +565,7 @@ class _ServicesTab extends StatelessWidget {
                 children: [
                   for (final c in svc.characteristics)
                     _CharTile(
+                      session: session,
                       char: c,
                       onWrite: () => onWrite(c),
                       onRead: () => onRead(c),
@@ -585,6 +585,7 @@ class _ServicesTab extends StatelessWidget {
 }
 
 class _CharTile extends StatelessWidget {
+  final DeviceSession session;
   final BluetoothCharacteristic char;
   final VoidCallback onWrite;
   final VoidCallback onRead;
@@ -593,6 +594,7 @@ class _CharTile extends StatelessWidget {
   final bool isTarget;
 
   const _CharTile({
+    required this.session,
     required this.char,
     required this.onWrite,
     required this.onRead,
@@ -604,23 +606,21 @@ class _CharTile extends StatelessWidget {
   String get _props {
     final p = char.properties;
     final list = <String>[];
-    if (p.contains(Property.read)) list.add('READ');
-    if (p.contains(Property.write)) list.add('WRITE');
-    if (p.contains(Property.writeWithoutResponse)) {
-      list.add('WRITE_NO_RESPONSE');
-    }
-    if (p.contains(Property.notify)) list.add('NOTIFY');
-    if (p.contains(Property.indicate)) list.add('INDICATE');
+    if (p.read) list.add('READ');
+    if (p.write) list.add('WRITE');
+    if (p.writeWithoutResponse) list.add('WRITE_NO_RESPONSE');
+    if (p.notify) list.add('NOTIFY');
+    if (p.indicate) list.add('INDICATE');
     return list.join(', ');
   }
 
   @override
   Widget build(BuildContext context) {
-    final writable = char.properties.contains(Property.write) ||
-        char.properties.contains(Property.writeWithoutResponse);
-    final notifiable = char.properties.contains(Property.notify) ||
-        char.properties.contains(Property.indicate);
-    final readable = char.properties.contains(Property.read);
+    final writable = char.properties.write ||
+        char.properties.writeWithoutResponse;
+    final notifiable = char.properties.notify ||
+        char.properties.indicate;
+    final readable = char.properties.read;
     final s = session;
 
     return ListTile(

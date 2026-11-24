@@ -62,8 +62,7 @@ class DeviceSession {
   Future<void> _afterConnected() async {
     BleEngine.instance.logEvent(mac, '连接成功，等待发现服务');
     try {
-      await device.discoverServices();
-      services = device.services;
+      services = await device.discoverServices();
       servicesReady.value = true;
       BleEngine.instance.logEvent(mac, '连接成功，并成功发现服务');
       // 默认发送目标：第一个可写特征
@@ -72,7 +71,7 @@ class DeviceSession {
       _rssiTimer?.cancel();
       _rssiTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
         try {
-          rssi.value = await device.readRssi();
+          rssi.value = (await device.readRssi()).round();
         } catch (_) {}
       });
     } catch (e) {
@@ -83,8 +82,7 @@ class DeviceSession {
   BluetoothCharacteristic? _firstWritable() {
     for (final s in services) {
       for (final c in s.characteristics) {
-        if (c.properties.contains(Property.write) ||
-            c.properties.contains(Property.writeWithoutResponse)) {
+        if (c.properties.write || c.properties.writeWithoutResponse) {
           return c;
         }
       }
@@ -116,8 +114,7 @@ class DeviceSession {
           recvPkts++;
           recvBytes += v.length;
           statsBump.value++;
-          final isInd = c.properties.contains(Property.indicate) &&
-              !c.properties.contains(Property.notify);
+          final isInd = c.properties.indicate && !c.properties.notify;
           BleEngine.instance.addDataLog(
             mac,
             c.uuid.str.toLowerCase(),
@@ -138,7 +135,7 @@ class DeviceSession {
   /// 读特征值
   Future<void> readChar(BluetoothCharacteristic c) async {
     try {
-      final v = await c.readValue();
+      final v = await c.read();
       recvPkts++;
       recvBytes += v.length;
       statsBump.value++;
@@ -213,7 +210,6 @@ class BleEngine {
   bool onlyNamed = false;
   int rssiThreshold = -100;
 
-  List<ScannerSetting> settings = [];
   bool loopScan = false;
   int scanPeriodSec = 10;
 

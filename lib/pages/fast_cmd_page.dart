@@ -164,7 +164,7 @@ class _FastCmdPageState extends State<FastCmdPage> {
         .entries
         .map((e) => e.value.exportLine(e.key + 1))
         .join('\n');
-    Clipboard.setData(Clipboard.setText(text));
+    Clipboard.setData(ClipboardData(text: text));
     _toast('已导出 ${_engine.cmds.length} 条命令到剪贴板（fast_cmds 格式，可直接粘贴保存为 txt）');
   }
 
@@ -240,8 +240,8 @@ class _FastCmdPageState extends State<FastCmdPage> {
                     final selected = _selected.contains(c.id);
                     return GestureDetector(
                       onLongPress: () {
-                        Clipboard.setData(Clipboard.setText(
-                            c.hexMode
+                        Clipboard.setData(ClipboardData(
+                            text: c.hexMode
                                 ? c.data.toUpperCase().replaceAll(' ', '')
                                 : c.data));
                         _toast('数据已复制，可粘贴到发送输入框');
