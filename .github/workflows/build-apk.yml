@@ -31,13 +31,16 @@ jobs:
         run: flutter --version
 
       - name: 生成安卓工程（与当前 Flutter 版本匹配）
-        run: flutter create --platforms=android --org com.lhk --project-name hello_demo .
+        run: flutter create --platforms=android --org com.lhk --project-name bletool .
 
-      - name: 设置 APP 显示名
-        run: sed -i 's/android:label="hello_demo"/android:label="你好Demo"/' android/app/src/main/AndroidManifest.xml
+      - name: 覆盖 Manifest（注入蓝牙权限与应用名）
+        run: cp ci/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
 
       - name: 拉取依赖
         run: flutter pub get
+
+      - name: 静态检查
+        run: flutter analyze --no-fatal-infos
 
       - name: 编译 Debug APK
         run: flutter build apk --debug
@@ -45,6 +48,6 @@ jobs:
       - name: 上传 APK（可下载）
         uses: actions/upload-artifact@v4
         with:
-          name: hello-demo-debug-apk
+          name: bletool-debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 30

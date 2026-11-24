@@ -1,5 +1,5 @@
-name: hello_demo
-description: "Flutter 云端编译闭环练习 Demo"
+name: bletool
+description: "BLE 调试助手（Flutter 版）— 供硬件工程师日常调试 BLE 设备"
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -9,6 +9,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_blue_plus: ^1.35.2
+  permission_handler: ^11.3.1
+  shared_preferences: ^2.3.2
 
 dev_dependencies:
   flutter_test:

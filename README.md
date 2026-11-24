@@ -1,38 +1,38 @@
-# 你好Demo（Flutter 云端编译闭环练习）
+# BLE调试助手（Flutter 版）
 
-一个最小可用的 Flutter 工程，用来跑通「改代码 → 云端编译 → 装手机 → 看日志」的完整闭环。
-**本机不需要安装 Flutter / Android SDK。**
+硬件工程师日常用的安卓 BLE 调试工具。功能对标原版「BLE蓝牙助手 1.3.95」（去广告版），代码全部原创。
 
-## 一、闭环流程
+功能规格详见 [docs/功能规格.md](docs/功能规格.md)。
+（旧的云编译入门笔记还在 `学习手册.md` / `GitHub操作笔记.md`，操作流程没变。）
 
-| 步骤 | 你要做什么 | 在哪做 |
-|---|---|---|
-| 1 | 改 `lib/main.dart` 里的文字 | 本机（用记事本/VSCode 都行） |
-| 2 | 提交并推送到 GitHub | 本机 |
-| 3 | 等云端编译（约 3~8 分钟） | GitHub 网页 → Actions |
-| 4 | 下载 APK | GitHub 网页 → Actions → 本次运行 → Artifacts |
-| 5 | 装到手机上 | 把 APK 拖到 `2-安装APK.bat` 上 |
-| 6 | 看日志 | 双击 `1-查看日志.bat` |
+## 现在能用的功能
 
-## 二、手机上要开的开关
+- 🔍 **扫描页**：可用设备/活动连接双 Tab、名称/地址/UUID/RSSI 过滤、循环扫描、单次扫描周期设置
+- 📱 **连接**：多设备同时连接、服务/特征值树形展示（已知 UUID 显示友好名）
+- ✍️ **读写**：特征值读取、hex/ascii 写入、无响应写、通知开关
+- 📜 **实时日志**：收发日志、关键字过滤、hex/ascii 切换、自动滚动、收发包计数
+- 🚀 **发送栏**：发送历史、循环发送+延时、自定义按键面板
+- 🎛 **自定义按键**：增删改、批量发送、剪贴板导入/导出（兼容原版 fast_cmds 格式）
 
-1. 设置 → 关于手机 → 连续点「版本号」7 次，开启开发者选项
-2. 开发者选项 → 打开「USB 调试」（有的品牌还要开「USB 安装」）
-3. 用数据线连电脑，手机上弹窗选「允许」
+## 编译方式
 
-## 三、这个 Demo 里已经埋好的验证点
+推送到 main 分支 → GitHub Actions 云编译 → Actions 页面下载 `bletool-debug-apk` → 拖到 `2-安装APK.bat` 安装。
 
-- 界面显示大字「欢迎使用」 → 验证 APK 能装能跑
-- 启动时打印 `=== 你好Demo 启动成功 ===` → 验证日志链路
-- 每秒打印一次 `心跳 N 次，运行中...` → 验证实时日志
-- 点按钮打印时间戳 → 验证交互日志
+## 目录结构
 
-## 四、编译配置
+```
+lib/
+  main.dart            应用入口 + 橙色主题
+  core/ble_util.dart   hex/ascii 解析、UUID 友好名映射
+  models/models.dart   日志条目、自定义按键命令模型
+  services/ble_engine.dart  BLE 引擎（扫描/连接/会话/日志）
+  pages/
+    scan_page.dart     扫描主页 + 过滤抽屉
+    device_page.dart   设备详情（服务树/实时日志/发送栏）
+    fast_cmd_page.dart 自定义按键
+ci/AndroidManifest.xml CI 用 Manifest 模板（蓝牙权限）
+```
 
-`.github/workflows/build-apk.yml` 已写好：推送到 `main` 分支自动编译 Debug APK 并上传。
-也可以在网页 Actions 页面点「Run workflow」手动触发。
+## 后续排期（见功能规格）
 
-## 五、为什么用 Debug 包
-
-Debug 包带完整日志输出，`adb logcat` 能看到 App 里 `debugPrint/print` 的所有内容。
-正式用的时候在 workflow 里把 `--debug` 改成 `--release` 即可。
+收藏设备、扫码连接、广播数据图表页（RSSI 曲线 + AD 结构解析）、发送文件、日志落盘导出、外围模式（二期）。
