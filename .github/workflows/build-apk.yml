@@ -36,6 +36,9 @@ jobs:
       - name: 覆盖 Manifest（注入蓝牙权限与应用名）
         run: cp ci/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
 
+      - name: 提升 compileSdk 至 36（新插件要求）
+        run: sed -i 's/flutter.compileSdkVersion/36/g' android/app/build.gradle || true
+
       - name: 拉取依赖
         run: flutter pub get
 
