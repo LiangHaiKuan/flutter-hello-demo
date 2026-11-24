@@ -22,8 +22,6 @@ class DevicePage extends StatefulWidget {
 class _DevicePageState extends State<DevicePage> {
   final BleEngine _engine = BleEngine.instance;
   DeviceSession? _session;
-  bool _autoScroll = true;
-  bool _showSend = true;
   bool _hexMode = true;
   _WriteType _writeType = _WriteType.defaultWrite;
   bool _loopSend = false;
