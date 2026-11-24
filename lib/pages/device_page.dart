@@ -27,7 +27,9 @@ class DevicePage extends StatefulWidget {
 class _DevicePageState extends State<DevicePage> {
   final BleEngine _engine = BleEngine.instance;
   DeviceSession? _session;
-  bool _hexMode = true;
+  TextCodec _codec = TextCodec.hex; // 发送/日志显示编码（hex/ascii/utf8/gbk）
+  bool _translate = false; // 接收区 hex→文本翻译（点一下更新一次）
+  DateTime? _translateSnapshot; // 翻译只作用于点击时刻之前的日志
   _WriteType _writeType = _WriteType.defaultWrite;
   bool _loopSend = false;
   final TextEditingController _sendCtl = TextEditingController();
@@ -68,7 +70,7 @@ class _DevicePageState extends State<DevicePage> {
   // ---------- 发送 ----------
   Future<void> _sendOnce() async {
     final text = _sendCtl.text;
-    final bytes = HexUtil.parse(text, _hexMode);
+    final bytes = HexUtil.parse(text, _codec);
     if (bytes == null) {
       _toast('数据格式错误');
       return;
@@ -104,7 +106,7 @@ class _DevicePageState extends State<DevicePage> {
   // ---------- 特征值操作 ----------
   Future<void> _showWriteDialog(BluetoothCharacteristic c) async {
     final ctl = TextEditingController();
-    bool hex = true;
+    TextCodec codec = _codec;
     bool noResp = false;
     final ok = await showDialog<bool>(
       context: context,
@@ -118,22 +120,22 @@ class _DevicePageState extends State<DevicePage> {
                 controller: ctl,
                 autofocus: true,
                 decoration: InputDecoration(
-                  hintText: hex ? 'aa00bb11cc22（支持空格）' : '输入 ascii 文本',
+                  hintText: codec == TextCodec.hex
+                      ? 'aa00bb11cc22（支持空格）'
+                      : '输入 ${codec.label} 文本',
                 ),
               ),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  ChoiceChip(
-                    label: const Text('hex'),
-                    selected: hex,
-                    onSelected: (_) => setD(() => hex = true),
-                  ),
-                  const SizedBox(width: 8),
-                  ChoiceChip(
-                    label: const Text('ascii'),
-                    selected: !hex,
-                    onSelected: (_) => setD(() => hex = false),
+                  DropdownButton<TextCodec>(
+                    value: codec,
+                    underline: const SizedBox.shrink(),
+                    items: TextCodec.values
+                        .map((x) => DropdownMenuItem(
+                            value: x, child: Text(x.label)))
+                        .toList(),
+                    onChanged: (v) => setD(() => codec = v ?? TextCodec.hex),
                   ),
                   const Spacer(),
                   Checkbox(
@@ -157,12 +159,12 @@ class _DevicePageState extends State<DevicePage> {
       ),
     );
     if (ok != true) return;
-    final bytes = HexUtil.parse(ctl.text, hex);
+    final bytes = HexUtil.parse(ctl.text, codec);
     if (bytes == null) {
       _toast('数据格式错误');
       return;
     }
-    session.targetChar.value = c;
+    session.targetChar.value = c; // 写入后该特征成为发送目标（最新点击为准）
     await session.send(bytes, noResp);
   }
 
@@ -289,8 +291,8 @@ class _DevicePageState extends State<DevicePage> {
                             style: const TextStyle(
                                 fontFamily: 'monospace', fontSize: 12)),
                         onTap: () async {
-                          final bytes =
-                              HexUtil.parse(c.data, c.hexMode);
+                          final bytes = HexUtil.parse(c.data,
+                              c.hexMode ? TextCodec.hex : TextCodec.ascii);
                           if (bytes == null) {
                             _toast('命令数据格式错误: ${c.name}');
                             return;
@@ -364,6 +366,15 @@ class _DevicePageState extends State<DevicePage> {
                 _shareLogs();
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.tune, color: Color(0xFFF57C00)),
+              title: const Text('日志格式设置'),
+              subtitle: const Text('时间 / [主题] / 动作文字 / 引号 可配置'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showLogFormatDialog();
+              },
+            ),
             ValueListenableBuilder<int>(
               valueListenable: session.statsBump, // mtu 变化时借 statsBump 刷新
               builder: (_, __, ___) => ListTile(
@@ -403,14 +414,84 @@ class _DevicePageState extends State<DevicePage> {
     );
   }
 
-  // ---------- 导出/分享日志（落盘） ----------
+  // ---------- 日志格式设置（编辑按钮） ----------
+  void _showLogFormatDialog() {
+    final e = _engine;
+    showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: const Text('日志格式设置'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('行结构：时间> [主题] 动作: "数据"',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('显示时间（16:17:47.956>）'),
+                value: e.logShowTime,
+                activeColor: const Color(0xFFF57C00),
+                onChanged: (v) => setD(() => e.logShowTime = v ?? true),
+              ),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('显示 [发送主题]（特征值UUID缩写）'),
+                value: e.logShowTag,
+                activeColor: const Color(0xFFF57C00),
+                onChanged: (v) => setD(() => e.logShowTag = v ?? true),
+              ),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('显示动作文字（成功写入:/Notify:）'),
+                value: e.logShowDir,
+                activeColor: const Color(0xFFF57C00),
+                onChanged: (v) => setD(() => e.logShowDir = v ?? true),
+              ),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('数据用引号包裹（"FF 55 AA"）'),
+                value: e.logShowQuote,
+                activeColor: const Color(0xFFF57C00),
+                onChanged: (v) => setD(() => e.logShowQuote = v ?? true),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('保存')),
+          ],
+        ),
+      ),
+    );
+    e.saveLogFormat();
+    setState(() {});
+  }
+
+  // ---------- 导出/分享日志（落盘，按用户配置的行格式） ----------
   String _buildLogText() {
+    final e2 = _engine;
     final sb = StringBuffer();
-    for (final e in _engine.logs.value) {
+    for (final e in e2.logs.value) {
       if (e.dir == LogDir.event) {
         sb.writeln('${e.timeStr}> ${e.message ?? ''}');
       } else {
-        sb.writeln('${e.timeStr}> [${e.tag}] ${e.dirStr} "${HexUtil.toHex(e.bytes)}"');
+        sb.writeln(_LogLine.format(e, TextCodec.hex,
+            showTime: e2.logShowTime,
+            showTag: e2.logShowTag,
+            showDir: e2.logShowDir,
+            showQuote: e2.logShowQuote));
       }
     }
     return sb.toString();
@@ -658,10 +739,23 @@ class _DevicePageState extends State<DevicePage> {
                           ),
                           _LogTab(
                             session: session,
-                            hexMode: _hexMode,
+                            codec: _codec,
+                            translate: _translate,
+                            translateSnapshot: _translateSnapshot,
                             filterCtl: _filterCtl,
                             logScroll: _logScroll,
-                            onFormat: (v) => setState(() => _hexMode = v),
+                            onFormat: (v) => setState(() => _codec = v),
+                            onTranslate: () {
+                              setState(() {
+                                _translate = !_translate;
+                                if (_translate) {
+                                  // 翻译只作用于点击时刻之前的日志，新收数据不自动翻译
+                                  _translateSnapshot = DateTime.now();
+                                } else {
+                                  _translateSnapshot = null;
+                                }
+                              });
+                            },
                           ),
                         ],
                       ),
@@ -768,17 +862,15 @@ class _DevicePageState extends State<DevicePage> {
                           const SizedBox(width: 12),
                           _iconBtn(Icons.bolt, '自定义按键', _showFastCmdSheet),
                           const SizedBox(width: 12),
-                          DropdownButton<bool>(
-                            value: _hexMode,
+                          DropdownButton<TextCodec>(
+                            value: _codec,
                             underline: const SizedBox.shrink(),
-                            items: const [
-                              DropdownMenuItem(
-                                  value: true, child: Text('hex')),
-                              DropdownMenuItem(
-                                  value: false, child: Text('ascii')),
-                            ],
+                            items: TextCodec.values
+                                .map((c) => DropdownMenuItem(
+                                    value: c, child: Text(c.label)))
+                                .toList(),
                             onChanged: (v) =>
-                                setState(() => _hexMode = v ?? true),
+                                setState(() => _codec = v ?? TextCodec.hex),
                           ),
                           const Spacer(),
                           TextButton(
@@ -934,58 +1026,65 @@ class _ServicesTabState extends State<_ServicesTab>
               ),
             );
           }
-          return ListView.builder(
-            itemCount: session.services.length,
-            itemBuilder: (_, i) {
-              final svc = session.services[i];
-              final uuidStr = svc.uuid.str;
-              final expanded = session.expandedServices.contains(uuidStr);
-              return Theme(
-                data: Theme.of(context)
-                    .copyWith(dividerColor: Colors.transparent),
-                child: ExpansionTile(
-                  key: ValueKey('svc_$uuidStr'),
-                  initiallyExpanded: expanded,
-                  tilePadding:
-                      const EdgeInsets.symmetric(horizontal: 16),
-                  childrenPadding:
-                      const EdgeInsets.only(left: 16, bottom: 8),
-                  onExpansionChanged: (v) {
-                    // 记忆展开状态：返回本页时保持
-                    setState(() {
-                      if (v) {
-                        session.expandedServices.add(uuidStr);
-                      } else {
-                        session.expandedServices.remove(uuidStr);
-                      }
-                    });
-                  },
-                  title: Text(
-                    UuidNames.serviceName(uuidStr),
-                    style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87),
-                  ),
-                  subtitle: Text('UUID: ${uuidStr.toLowerCase()}',
+          return ValueListenableBuilder<BluetoothCharacteristic?>(
+            valueListenable: session.targetChar,
+            builder: (_, target, __) => ListView.builder(
+              itemCount: session.services.length,
+              itemBuilder: (_, i) {
+                final svc = session.services[i];
+                final uuidStr = svc.uuid.str;
+                final expanded =
+                    session.expandedServices.contains(uuidStr);
+                return Theme(
+                  data: Theme.of(context)
+                      .copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    key: ValueKey('svc_$uuidStr'),
+                    initiallyExpanded: expanded,
+                    tilePadding:
+                        const EdgeInsets.symmetric(horizontal: 16),
+                    childrenPadding:
+                        const EdgeInsets.only(left: 16, bottom: 8),
+                    onExpansionChanged: (v) {
+                      // 记忆展开状态：返回本页时保持
+                      setState(() {
+                        if (v) {
+                          session.expandedServices.add(uuidStr);
+                        } else {
+                          session.expandedServices.remove(uuidStr);
+                        }
+                      });
+                    },
+                    title: Text(
+                      UuidNames.serviceName(uuidStr),
                       style: const TextStyle(
-                          fontSize: 11, color: Colors.grey)),
-                  children: [
-                    for (final c in svc.characteristics)
-                      _CharTile(
-                        session: session,
-                        char: c,
-                        onWrite: () => widget.onWrite(c),
-                        onRead: () => widget.onRead(c),
-                        onNotifyToggle: (v) => widget.onNotifyToggle(c, v),
-                        isTarget:
-                            session.targetChar.value?.uuid.str == c.uuid.str,
-                        onPickTarget: widget.onPickTarget,
-                      ),
-                  ],
-                ),
-              );
-            },
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black87),
+                    ),
+                    subtitle: Text('UUID: ${uuidStr.toLowerCase()}',
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.grey)),
+                    children: [
+                      for (final c in svc.characteristics)
+                        _CharTile(
+                          session: session,
+                          char: c,
+                          onWrite: () => widget.onWrite(c),
+                          onRead: () => widget.onRead(c),
+                          onNotifyToggle: (v) =>
+                              widget.onNotifyToggle(c, v),
+                          isTarget: target?.uuid.str == c.uuid.str,
+                          onPickTarget: () {
+                            // 最新点击为准：旧目标自动取消点亮
+                            session.targetChar.value = c;
+                          },
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
           );
         },
       ),
@@ -1059,9 +1158,17 @@ class _CharTile extends StatelessWidget {
         children: [
           if (writable)
             IconButton(
-              icon: const Icon(Icons.upload,
-                  color: Color(0xFFF57C00), size: 20),
-              tooltip: '写入（长按设为发送目标）',
+              // 只有当前发送目标才"点亮"（填充橙色），其余灰色描边
+              icon: Icon(
+                isTarget ? Icons.upload : Icons.upload_outlined,
+                color: isTarget
+                    ? const Color(0xFFF57C00)
+                    : Colors.grey,
+                size: 20,
+              ),
+              tooltip: isTarget
+                  ? '写入（当前发送目标）'
+                  : '写入（点击后设为发送目标）',
               onPressed: onWrite,
               onLongPress: onPickTarget,
             ),
@@ -1091,20 +1198,26 @@ class _CharTile extends StatelessWidget {
   }
 }
 
-// ---------------- 实时日志 Tab（暂停/清屏/清零/长按导出/导出到文件） ----------------
+// ---------------- 实时日志 Tab（暂停/清屏/清零/长按导出/导出到文件/hex翻译/格式配置） ----------------
 class _LogTab extends StatefulWidget {
   final DeviceSession session;
-  final bool hexMode;
+  final TextCodec codec;
+  final bool translate;
+  final DateTime? translateSnapshot;
   final TextEditingController filterCtl;
   final ScrollController logScroll;
-  final ValueChanged<bool> onFormat;
+  final ValueChanged<TextCodec> onFormat;
+  final VoidCallback onTranslate;
 
   const _LogTab({
     required this.session,
-    required this.hexMode,
+    required this.codec,
+    required this.translate,
+    required this.translateSnapshot,
     required this.filterCtl,
     required this.logScroll,
     required this.onFormat,
+    required this.onTranslate,
   });
 
   @override
@@ -1143,15 +1256,19 @@ class _LogTabState extends State<_LogTab> with AutomaticKeepAliveClientMixin {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           child: Row(
             children: [
-              DropdownButton<bool>(
-                value: widget.hexMode,
+              DropdownButton<TextCodec>(
+                value: widget.codec,
                 underline: const SizedBox.shrink(),
-                items: const [
-                  DropdownMenuItem(value: true, child: Text('hex')),
-                  DropdownMenuItem(value: false, child: Text('ascii')),
-                ],
-                onChanged: (v) => widget.onFormat(v ?? true),
+                items: TextCodec.values
+                    .map((c) => DropdownMenuItem(
+                        value: c, child: Text(c.label)))
+                    .toList(),
+                onChanged: (v) =>
+                    widget.onFormat(v ?? TextCodec.hex),
               ),
+              const SizedBox(width: 8),
+              // 翻译按钮：仅 hex 状态下可用，点一下把 hex 解析成文本（带背景色）
+              _translateChip(),
               const SizedBox(width: 8),
               _toggleChip('自动滚动', _autoScroll,
                   (v) => setState(() => _autoScroll = v)),
@@ -1220,9 +1337,7 @@ class _LogTabState extends State<_LogTab> with AutomaticKeepAliveClientMixin {
   bool _match(LogEntry e, String kw) {
     if (kw.isEmpty) return true;
     final lower = kw.toLowerCase();
-    final text = widget.hexMode
-        ? HexUtil.toHex(e.bytes).toLowerCase()
-        : HexUtil.toAscii(e.bytes).toLowerCase();
+    final text = HexUtil.toText(e.bytes, widget.codec).toLowerCase();
     return text.contains(lower) ||
         e.tag.toLowerCase().contains(lower) ||
         (e.message ?? '').toLowerCase().contains(lower);
@@ -1398,8 +1513,36 @@ class _LogTabState extends State<_LogTab> with AutomaticKeepAliveClientMixin {
       itemCount: list.length,
       itemBuilder: (_, i) => _LogLine(
         entry: list[i],
-        hexMode: widget.hexMode,
+        codec: widget.codec,
+        translate: widget.translate &&
+            widget.codec == TextCodec.hex &&
+            widget.translateSnapshot != null &&
+            !list[i].time.isAfter(widget.translateSnapshot!),
         onLongPress: () => _showExportSheet(list[i], list),
+      ),
+    );
+  }
+
+  /// 翻译开关（仅 hex 状态可用）：点一下把当前日志的 hex 翻译成文本，再点还原
+  Widget _translateChip() {
+    final enabled = widget.codec == TextCodec.hex;
+    final on = enabled && widget.translate;
+    return GestureDetector(
+      onTap: enabled ? widget.onTranslate : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: !enabled
+              ? Colors.grey.shade200
+              : (on ? const Color(0xFFF57C00) : Colors.grey.shade400),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Text('翻译',
+            style: TextStyle(
+                fontSize: 12,
+                color: !enabled
+                    ? Colors.grey
+                    : (on ? Colors.white : Colors.black54))),
       ),
     );
   }
@@ -1439,21 +1582,47 @@ class _LogTabState extends State<_LogTab> with AutomaticKeepAliveClientMixin {
 
 enum _ExportMode { hex, hexTs, ascii }
 
-/// 日志行（对标原版排版：时间> [uuid] 动作: "数据"，行距加大更易读）
+/// 日志行（行结构可配置：时间> [主题] 动作: "数据"）
+/// translate=true 时把 hex 翻译成可打印文本（带背景色），翻不出的保持 hex
 class _LogLine extends StatelessWidget {
   final LogEntry entry;
-  final bool hexMode;
+  final TextCodec codec;
+  final bool translate;
   final VoidCallback onLongPress;
 
   const _LogLine({
     required this.entry,
-    required this.hexMode,
+    required this.codec,
+    this.translate = false,
     required this.onLongPress,
   });
+
+  /// 按用户配置拼行（导出 txt 用）
+  static String format(LogEntry e, TextCodec codec,
+      {required bool showTime, required bool showTag,
+      required bool showDir, required bool showQuote}) {
+    final sb = StringBuffer();
+    if (showTime) sb.write('${e.timeStr}> ');
+    if (showTag && e.tag.isNotEmpty) sb.write('[${e.tag}] ');
+    if (showDir) sb.write('${e.dirStr} ');
+    final data = HexUtil.toText(e.bytes, codec);
+    sb.write(showQuote ? '"$data"' : data);
+    return sb.toString();
+  }
+
+  String _formatRaw(LogEntry e) => format(
+        e,
+        codec,
+        showTime: BleEngine.instance.logShowTime,
+        showTag: BleEngine.instance.logShowTag,
+        showDir: BleEngine.instance.logShowDir,
+        showQuote: BleEngine.instance.logShowQuote,
+      );
 
   @override
   Widget build(BuildContext context) {
     final e = entry;
+    final engine = BleEngine.instance;
     final Color dirColor;
     switch (e.dir) {
       case LogDir.notify:
@@ -1471,9 +1640,24 @@ class _LogLine extends StatelessWidget {
         dirColor = Colors.black54;
     }
     final isEvent = e.dir == LogDir.event;
-    final content = isEvent
-        ? e.message ?? ''
-        : '"${HexUtil.display(e.bytes, hexMode)}"'; // 数据加引号，对标原版
+
+    final List<InlineSpan> tail;
+    if (isEvent) {
+      tail = [TextSpan(text: e.message ?? '')];
+    } else if (translate) {
+      // 翻译模式：可打印字节 → 文字（带背景色），不可打印 → hex
+      tail = _buildTranslatedSpans(e, dirColor);
+    } else {
+      final data = HexUtil.toText(e.bytes, codec);
+      final text = engine.logShowQuote ? '"$data"' : data;
+      tail = [
+        if (engine.logShowDir) TextSpan(text: '${e.dirStr} ', style: TextStyle(color: dirColor)),
+        TextSpan(
+          text: text,
+          style: TextStyle(color: dirColor, fontFamily: 'monospace'),
+        ),
+      ];
+    }
 
     return InkWell(
       onLongPress: isEvent ? null : onLongPress,
@@ -1484,32 +1668,69 @@ class _LogLine extends StatelessWidget {
             style: const TextStyle(
                 fontSize: 13, height: 1.5, color: Colors.black87),
             children: [
-              // 时间戳灰色小字 + ">"
-              TextSpan(
-                text: '${e.timeStr}> ',
-                style: TextStyle(
-                    fontSize: 11.5,
-                    color: Colors.grey.shade500,
-                    fontFamily: 'monospace'),
-              ),
-              if (!isEvent && e.tag.isNotEmpty)
+              if (engine.logShowTime)
+                TextSpan(
+                  text: '${e.timeStr}> ',
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      color: Colors.grey.shade500,
+                      fontFamily: 'monospace'),
+                ),
+              if (!isEvent && engine.logShowTag && e.tag.isNotEmpty)
                 TextSpan(
                     text: '[${e.tag}] ',
                     style: const TextStyle(
                         color: Color(0xFF1565C0), fontFamily: 'monospace')),
-              if (!isEvent)
-                TextSpan(
-                    text: '${e.dirStr} ', style: TextStyle(color: dirColor)),
-              TextSpan(
-                text: content,
-                style: TextStyle(
-                    color: isEvent ? Colors.black54 : dirColor,
-                    fontFamily: isEvent ? null : 'monospace'),
-              ),
+              ...tail,
             ],
           ),
         ),
       ),
     );
+  }
+
+  /// 翻译模式数据段：连续可打印字节拼成文字加背景色，其余保持 hex
+  List<InlineSpan> _buildTranslatedSpans(LogEntry e, Color dirColor) {
+    final spans = <InlineSpan>[];
+    final sb = StringBuffer();
+    void flushText() {
+      if (sb.isEmpty) return;
+      spans.add(WidgetSpan(
+        alignment: PlaceholderAlignment.middle,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          margin: const EdgeInsets.symmetric(horizontal: 1),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFE0B2), // 淡橙背景（翻译出的文字）
+            borderRadius: BorderRadius.circular(3),
+          ),
+          child: Text(sb.toString(),
+              style: const TextStyle(
+                  fontSize: 13,
+                  color: Colors.black87,
+                  fontFamily: 'monospace')),
+        ),
+      ));
+      sb.clear();
+    }
+
+    if (BleEngine.instance.logShowDir) {
+      spans.add(TextSpan(
+          text: '${e.dirStr} ', style: TextStyle(color: dirColor)));
+    }
+    for (final b in e.bytes) {
+      if (b >= 0x20 && b <= 0x7E) {
+        sb.writeCharCode(b);
+      } else {
+        flushText();
+        spans.add(TextSpan(
+          text:
+              '${b.toRadixString(16).padLeft(2, '0').toUpperCase()} ',
+          style: TextStyle(color: dirColor, fontFamily: 'monospace'),
+        ));
+      }
+    }
+    flushText();
+    return spans;
   }
 }

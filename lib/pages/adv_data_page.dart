@@ -40,7 +40,7 @@ class _AdvDataPageState extends State<AdvDataPage> {
       // 已连接设备：把 readRssi 的值也记进曲线历史
       _rssiListener = () {
         final v = _session!.rssi.value;
-        if (v > 0) {
+        if (v < 0 && v >= -100) { // 过滤无效值（0=未知），避免曲线被拉平
           final h = _engine.rssiHistory.putIfAbsent(widget.mac, () => []);
           h.add(v);
           if (h.length > 300) h.removeRange(0, h.length - 300);
@@ -171,8 +171,15 @@ class _AdvDataPageState extends State<AdvDataPage> {
     return Scaffold(
       appBar: AppBar(
         leading: BackButton(onPressed: () => Navigator.of(context).pop()),
-        title: Text('广播数据(${widget.name})',
-            style: const TextStyle(fontSize: 17)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('广播数据(${widget.name})',
+                style: const TextStyle(fontSize: 17)),
+            Text(widget.mac,
+                style: const TextStyle(fontSize: 11, color: Colors.white70)),
+          ],
+        ),
         actions: [
           PopupMenuButton<String>(
             onSelected: (v) {
@@ -250,8 +257,8 @@ class _AdvDataPageState extends State<AdvDataPage> {
           const Text('字符串翻译视图:',
               style: TextStyle(fontSize: 14, color: Colors.black54)),
           const SizedBox(height: 2),
-          const Text('可打印字符（0~9、a~Z、常用标点）翻译成字符用绿色显示，'
-                  '无法翻译的字节保持黑色十六进制',
+          const Text('可打印字符（0~9、a~Z、常用标点）翻译成字符用背景色标出，'
+                  '无法翻译的字节保持十六进制',
               style: TextStyle(fontSize: 11, color: Colors.grey)),
           const SizedBox(height: 6),
           _buildTranslateTable(adv),
@@ -376,17 +383,24 @@ class _AdvDataPageState extends State<AdvDataPage> {
     );
   }
 
-  /// 单字节翻译：可打印 ASCII（0x20~0x7E）→ 绿色字符；否则黑色 hex
+  /// 单字节翻译：可打印 ASCII（0x20~0x7E）→ 文字加背景色；否则黑色 hex
   Widget _translatedByte(int b) {
     final printable = b >= 0x20 && b <= 0x7E;
     if (printable) {
-      return Text(
-        String.fromCharCode(b),
-        style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF2E7D32), // 绿色
-            fontFamily: 'monospace'),
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 3),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFE0B2), // 淡橙背景：翻译出来的字符
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: Text(
+          String.fromCharCode(b),
+          style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+              fontFamily: 'monospace'),
+        ),
       );
     }
     return Text(
@@ -439,7 +453,7 @@ class _RssiPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    const top = -32.0, bottom = -100.0;
+    const top = -20.0, bottom = -100.0;
     const padL = 36.0, padR = 36.0, padT = 8.0, padB = 16.0;
     final chartW = size.width - padL - padR;
     final chartH = size.height - padT - padB;
@@ -457,8 +471,8 @@ class _RssiPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     final textStyle = TextStyle(fontSize: 10, color: Colors.grey.shade600);
 
-    // 纵轴：-100 到 -30，每 10dBm 一格（更通用）
-    for (var v = -30; v >= bottom; v -= 10) {
+    // 纵轴：-100 到 -20，每 10dBm 一格
+    for (var v = -20; v >= bottom; v -= 10) {
       final y = padT + (top - v) / (top - bottom) * chartH;
       canvas.drawLine(
           Offset(padL, y), Offset(size.width - padR, y), gridPaint);
@@ -506,5 +520,5 @@ class _RssiPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _RssiPainter old) => old.values != values;
+  bool shouldRepaint(covariant _RssiPainter old) => true; // values 是原地追加的同一个 List，必须每帧重绘
 }

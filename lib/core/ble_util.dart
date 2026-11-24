@@ -1,16 +1,54 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-/// hex / ascii 数据解析与显示工具
+import 'package:gbk_codec/gbk_codec.dart';
+
+/// 文本编码格式（对标原版"编码"选择：hex / us-ascii / utf-8 / gbk 等常用项）
+enum TextCodec { hex, ascii, utf8, gbk }
+
+extension TextCodecX on TextCodec {
+  String get label {
+    switch (this) {
+      case TextCodec.hex:
+        return 'hex';
+      case TextCodec.ascii:
+        return 'us-ascii';
+      case TextCodec.utf8:
+        return 'utf-8';
+      case TextCodec.gbk:
+        return 'gbk';
+    }
+  }
+
+  static TextCodec fromLabel(String s) {
+    switch (s.toLowerCase()) {
+      case 'hex':
+        return TextCodec.hex;
+      case 'us-ascii':
+      case 'ascii':
+        return TextCodec.ascii;
+      case 'utf-8':
+      case 'utf8':
+        return TextCodec.utf8;
+      case 'gbk':
+      case 'gb2312':
+        return TextCodec.gbk;
+      default:
+        return TextCodec.hex;
+    }
+  }
+}
+
+/// hex / 文本 数据解析与显示工具
 class HexUtil {
   HexUtil._();
 
   /// 解析用户输入为字节数据。
   /// hex 模式：支持 "aa 00 bb" / "aa00bb" / "0xAA 0x0B"
-  /// ascii 模式：按 latin1 编码
+  /// 文本模式：按对应编码编码
   /// 解析失败返回 null。
-  static Uint8List? parse(String input, bool hexMode) {
-    if (hexMode) {
+  static Uint8List? parse(String input, TextCodec codec) {
+    if (codec == TextCodec.hex) {
       var cleaned = input.trim().toLowerCase();
       if (cleaned.isEmpty) return null;
       cleaned = cleaned.replaceAll(RegExp(r'0x'), ' ');
@@ -33,9 +71,17 @@ class HexUtil {
       }
       if (bytes.isEmpty) return null;
       return Uint8List.fromList(bytes);
-    } else {
-      if (input.isEmpty) return null;
-      return Uint8List.fromList(latin1.encode(input));
+    }
+    if (input.isEmpty) return null;
+    switch (codec) {
+      case TextCodec.ascii:
+        return Uint8List.fromList(latin1.encode(input));
+      case TextCodec.utf8:
+        return Uint8List.fromList(utf8.encode(input));
+      case TextCodec.gbk:
+        return Uint8List.fromList(gbk_bytes.encode(input));
+      default:
+        return null;
     }
   }
 
@@ -58,9 +104,23 @@ class HexUtil {
     return sb.toString();
   }
 
+  /// 字节 → 对应编码文本
+  static String toText(List<int> bytes, TextCodec codec) {
+    switch (codec) {
+      case TextCodec.hex:
+        return toHex(bytes);
+      case TextCodec.ascii:
+        return toAscii(bytes);
+      case TextCodec.utf8:
+        return utf8.decode(bytes, allowMalformed: true);
+      case TextCodec.gbk:
+        return gbk_bytes.decode(bytes);
+    }
+  }
+
   /// 显示用：按当前格式输出
-  static String display(List<int> bytes, bool hexMode) {
-    return hexMode ? toHex(bytes) : toAscii(bytes);
+  static String display(List<int> bytes, TextCodec codec) {
+    return toText(bytes, codec);
   }
 }
 

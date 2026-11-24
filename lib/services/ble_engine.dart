@@ -61,8 +61,6 @@ class DeviceSession {
 
   bool get isConnected =>
       state.value == BluetoothConnectionState.connected;
-
-  /// 首次连接 / 回连入口
   Future<void> connectNow() async {
     manualDisconnect = false;
     _reconnectTimer?.cancel();
@@ -104,7 +102,7 @@ class DeviceSession {
       services = await device.discoverServices();
       servicesReady.value = true;
       BleEngine.instance.logEvent(mac, '连接成功，并成功发现服务');
-      targetChar.value ??= _firstWritable();
+      // 发送目标不自动点亮：由用户在蓝牙服务页点击选择（最新点击为准）
       _rssiTimer?.cancel();
       _rssiTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
         try {
@@ -114,17 +112,6 @@ class DeviceSession {
     } catch (e) {
       BleEngine.instance.logEvent(mac, '发现服务失败: $e');
     }
-  }
-
-  BluetoothCharacteristic? _firstWritable() {
-    for (final s in services) {
-      for (final c in s.characteristics) {
-        if (c.properties.write || c.properties.writeWithoutResponse) {
-          return c;
-        }
-      }
-    }
-    return null;
   }
 
   void _onDisconnected() {
@@ -297,12 +284,12 @@ class BleEngine {
   final ValueNotifier<List<LogEntry>> logs = ValueNotifier([]);
   static const int _maxLogs = 5000;
 
-  /// 扫描过滤条件
+  /// 扫描过滤条件（默认配置对标原版：BLE✓ 名称非空✓ RSSI≥-50）
   String nameFilter = '';
   String uuidFilter = '';
   bool onlyBle = true;
-  bool onlyNamed = false;
-  int rssiThreshold = -100;
+  bool onlyNamed = true;
+  int rssiThreshold = -50;
 
   bool loopScan = false;
   int scanPeriodSec = 10;
@@ -310,10 +297,85 @@ class BleEngine {
   /// 断线自动回连（设备断电重上电后自动重连）
   bool autoReconnect = false;
 
+  /// ---- 日志行格式配置（实时日志三点菜单"日志格式设置"里改）----
+  /// 行结构：时间> [主题] 动作: "数据"
+  bool logShowTime = true;
+  bool logShowTag = true;
+  bool logShowDir = true;
+  bool logShowQuote = true;
+
+  /// ---- 自定义按键云端同步链接（链接1/2/3...）----
+  List<String> cloudLinks = ['https://notepad.1976f.com/LXHL/R4-7'];
+
+  /// ---- 外围模式配置 ----
+  String advLocalName = 'BLE调试助手';
+  String advServiceUuid = '0000ff11-0000-1000-8000-00805f9b34fb';
+  String advCharServiceUuid = '0000ff00-0000-1000-8000-00805f9b34fb';
+  String advCharUuid = '0000ff01-0000-1000-8000-00805f9b34fb';
+  String advCharData = '010203040506'; // 特征数据（中央读取时返回）
+  String advNotifyData = '060504030201'; // 通知数据（响应模式发送）
+  int advResponseMode = 0; // 0=被写入时回复 1=循环发送
+  int advLoopDelayMs = 500;
+  List<ReplyRule> replyRules = [];
+
   Future<void> loadSettings() async {
     final sp = await SharedPreferences.getInstance();
     autoReconnect = sp.getBool('auto_reconnect') ?? false;
+    logShowTime = sp.getBool('log_show_time') ?? true;
+    logShowTag = sp.getBool('log_show_tag') ?? true;
+    logShowDir = sp.getBool('log_show_dir') ?? true;
+    logShowQuote = sp.getBool('log_show_quote') ?? true;
+    final links = sp.getStringList('cloud_links');
+    if (links != null && links.isNotEmpty) cloudLinks = links;
+    advLocalName = sp.getString('adv_local_name') ?? advLocalName;
+    advServiceUuid = sp.getString('adv_service_uuid') ?? advServiceUuid;
+    advCharServiceUuid =
+        sp.getString('adv_char_service_uuid') ?? advCharServiceUuid;
+    advCharUuid = sp.getString('adv_char_uuid') ?? advCharUuid;
+    advCharData = sp.getString('adv_char_data') ?? advCharData;
+    advNotifyData = sp.getString('adv_notify_data') ?? advNotifyData;
+    advResponseMode = sp.getInt('adv_response_mode') ?? 0;
+    advLoopDelayMs = sp.getInt('adv_loop_delay') ?? 500;
+    final rules = sp.getString('adv_reply_rules');
+    if (rules != null && rules.isNotEmpty) {
+      try {
+        final arr = jsonDecode(rules) as List;
+        replyRules = arr
+            .whereType<Map>()
+            .map((e) => ReplyRule.fromJson(e.cast<String, dynamic>()))
+            .toList();
+      } catch (_) {
+        replyRules = [];
+      }
+    }
     loadCmds();
+  }
+
+  Future<void> saveLogFormat() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool('log_show_time', logShowTime);
+    await sp.setBool('log_show_tag', logShowTag);
+    await sp.setBool('log_show_dir', logShowDir);
+    await sp.setBool('log_show_quote', logShowQuote);
+  }
+
+  Future<void> saveCloudLinks() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setStringList('cloud_links', cloudLinks);
+  }
+
+  Future<void> saveAdvConfig() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString('adv_local_name', advLocalName);
+    await sp.setString('adv_service_uuid', advServiceUuid);
+    await sp.setString('adv_char_service_uuid', advCharServiceUuid);
+    await sp.setString('adv_char_uuid', advCharUuid);
+    await sp.setString('adv_char_data', advCharData);
+    await sp.setString('adv_notify_data', advNotifyData);
+    await sp.setInt('adv_response_mode', advResponseMode);
+    await sp.setInt('adv_loop_delay', advLoopDelayMs);
+    await sp.setString(
+        'adv_reply_rules', jsonEncode(replyRules.map((r) => r.toJson()).toList()));
   }
 
   Future<void> setAutoReconnect(bool v) async {
@@ -385,9 +447,13 @@ class BleEngine {
         final mac = r.device.remoteId.str;
         map[mac] = r;
         latestResults[mac] = r;
-        final h = rssiHistory.putIfAbsent(mac, () => []);
-        h.add(r.rssi);
-        if (h.length > 300) h.removeRange(0, h.length - 300);
+        // 只记录有效 RSSI（0 = 未知、127 = 读不到），避免曲线被无效值拉平
+        final rssi = r.rssi;
+        if (rssi < 0 && rssi >= -100) {
+          final h = rssiHistory.putIfAbsent(mac, () => []);
+          h.add(rssi);
+          if (h.length > 300) h.removeRange(0, h.length - 300);
+        }
       }
       final list = map.values.toList()
         ..sort((a, b) => b.rssi.compareTo(a.rssi));

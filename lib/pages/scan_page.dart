@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../services/ble_engine.dart';
 import 'adv_data_page.dart';
 import 'device_page.dart';
+import 'peripheral_page.dart';
 
 /// 扫描主页：可用设备 / 活动连接
 class ScanPage extends StatefulWidget {
@@ -85,11 +86,13 @@ class _ScanPageState extends State<ScanPage> {
                 if (v == 'scan') _showScanSettings();
                 if (v == 'filter') _showFilterSettings();
                 if (v == 'conn') _showConnectSettings();
+                if (v == 'peripheral') _openPeripheralMode();
               },
               itemBuilder: (_) => const [
                 PopupMenuItem(value: 'scan', child: Text('扫描设置')),
                 PopupMenuItem(value: 'filter', child: Text('过滤设置')),
                 PopupMenuItem(value: 'conn', child: Text('连接设置')),
+                PopupMenuItem(value: 'peripheral', child: Text('外围模式')),
               ],
             ),
           ],
@@ -108,6 +111,13 @@ class _ScanPageState extends State<ScanPage> {
         ),
       ),
     );
+  }
+
+  // ---------- 外围模式（手机当 BLE 从机） ----------
+  void _openPeripheralMode() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => const PeripheralConfigPage(),
+    ));
   }
 
   // ---------- 扫描设置 ----------
@@ -243,9 +253,11 @@ class _ScanPageState extends State<ScanPage> {
                     child: Slider(
                       activeColor: const Color(0xFFF57C00),
                       min: -100,
-                      max: 0,
-                      divisions: 100,
-                      value: _engine.rssiThreshold.toDouble(),
+                      max: -20, // 信号强度范围 -20 ~ -100
+                      divisions: 80,
+                      value: _engine.rssiThreshold
+                          .clamp(-100, -20)
+                          .toDouble(),
                       onChanged: (v) => setSheet(
                           () => _engine.rssiThreshold = v.round()),
                     ),
