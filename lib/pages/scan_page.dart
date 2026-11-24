@@ -5,6 +5,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../services/ble_engine.dart';
+import '../widgets/log_floating.dart';
 import 'adv_data_page.dart';
 import 'device_page.dart';
 import 'peripheral_page.dart';

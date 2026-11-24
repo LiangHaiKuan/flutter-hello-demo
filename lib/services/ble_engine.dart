@@ -173,11 +173,14 @@ class DeviceSession {
     statsBump.value++;
   }
 
-  /// 开关通知
+  /// 开关通知（乐观更新：点击立即点亮/熄灭，失败再回退）
   Future<bool> setNotify(BluetoothCharacteristic c, bool enable) async {
+    final key = c.uuid.str.toLowerCase();
+    // 乐观更新 UI
+    notifyState[key] = enable;
+    notifyBump.value++;
     try {
       await c.setNotifyValue(enable);
-      notifyState[c.uuid.str.toLowerCase()] = enable;
       if (enable && !_notifySubs.containsKey(c.uuid.str)) {
         _notifySubs[c.uuid.str] = c.onValueReceived.listen((v) {
           recvPkts++;
@@ -191,11 +194,16 @@ class DeviceSession {
             v,
           );
         });
+      } else if (!enable) {
+        _notifySubs.remove(c.uuid.str)?.cancel();
       }
       BleEngine.instance.logEvent(
           mac, '[${shortUuid(c.uuid.str)}] Notification${enable ? '开启' : '关闭'}');
       return true;
     } catch (e) {
+      // 失败回退
+      notifyState[key] = !enable;
+      notifyBump.value++;
       BleEngine.instance.logEvent(mac, '设置通知失败: $e');
       return false;
     }
@@ -248,6 +256,7 @@ class DeviceSession {
     for (final sub in _notifySubs.values) {
       sub.cancel();
     }
+    notifyBump.dispose();
     state.dispose();
     rssi.dispose();
     servicesReady.dispose();

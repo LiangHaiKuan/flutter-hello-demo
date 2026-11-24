@@ -770,6 +770,20 @@ class _PeripheralLogPageState extends State<PeripheralLogPage> {
                 Navigator.of(context).pop();
               },
             ),
+            ListTile(
+              leading: Icon(
+                Icons.picture_in_picture,
+                color: FloatingLog.instance.isShowing
+                    ? Colors.green
+                    : const Color(0xFFF57C00),
+              ),
+              title: const Text('悬浮日志'),
+              subtitle: const Text('置顶小窗：可拖动/缩放/最大化/复制'),
+              onTap: () {
+                Navigator.pop(ctx);
+                FloatingLog.instance.toggle(context);
+              },
+            ),
           ],
         ),
       ),

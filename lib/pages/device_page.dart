@@ -103,69 +103,27 @@ class _DevicePageState extends State<DevicePage> {
         .showSnackBar(SnackBar(content: Text(msg), duration: const Duration(milliseconds: 800)));
   }
 
+  /// hex 翻译开关：点一下翻译当前日志，再点还原；新收数据不自动翻译
+  void _setTranslate(bool v) {
+    setState(() {
+      _translate = v;
+      if (v) {
+        _translateSnapshot = DateTime.now();
+      } else {
+        _translateSnapshot = null;
+      }
+    });
+  }
+
   // ---------- 特征值操作 ----------
-  Future<void> _showWriteDialog(BluetoothCharacteristic c) async {
-    final ctl = TextEditingController();
-    TextCodec codec = _codec;
-    bool noResp = false;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => AlertDialog(
-          title: Text('写入 ${UuidNames.charName(c.uuid.str)}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: ctl,
-                autofocus: true,
-                decoration: InputDecoration(
-                  hintText: codec == TextCodec.hex
-                      ? 'aa00bb11cc22（支持空格）'
-                      : '输入 ${codec.label} 文本',
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  DropdownButton<TextCodec>(
-                    value: codec,
-                    underline: const SizedBox.shrink(),
-                    items: TextCodec.values
-                        .map((x) => DropdownMenuItem(
-                            value: x, child: Text(x.label)))
-                        .toList(),
-                    onChanged: (v) => setD(() => codec = v ?? TextCodec.hex),
-                  ),
-                  const Spacer(),
-                  Checkbox(
-                    value: noResp,
-                    onChanged: (v) => setD(() => noResp = v ?? false),
-                  ),
-                  const Text('无响应写'),
-                ],
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('取消')),
-            ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('写入')),
-          ],
-        ),
-      ),
-    );
-    if (ok != true) return;
-    final bytes = HexUtil.parse(ctl.text, codec);
-    if (bytes == null) {
-      _toast('数据格式错误');
-      return;
+  /// 上传图标 = 发送通道开关：点一下把该特征设为发送目标（点亮），再点一下取消。
+  /// 数据从底部发送栏发出（第二个方法：底部"未选特征"文字按钮，保留）。
+  void _toggleTarget(BluetoothCharacteristic c) {
+    if (session.targetChar.value?.uuid.str == c.uuid.str) {
+      session.targetChar.value = null;
+    } else {
+      session.targetChar.value = c;
     }
-    session.targetChar.value = c; // 写入后该特征成为发送目标（最新点击为准）
-    await session.send(bytes, noResp);
   }
 
   void _pickTargetChar() {
@@ -280,6 +238,18 @@ class _DevicePageState extends State<DevicePage> {
                       padding: EdgeInsets.all(12),
                       child: Text('自定义按键（点击发送）',
                           style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.edit,
+                          color: Color(0xFFF57C00)),
+                      title: const Text('编辑命令（增删改 / 导入导出 / 云端）'),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const FastCmdPage()));
+                      },
                     ),
                     for (final c in engine.cmds.where((c) => c.enabled))
                       ListTile(
@@ -406,6 +376,50 @@ class _DevicePageState extends State<DevicePage> {
                     MaterialPageRoute(
                         builder: (_) =>
                             KnowledgePage(section: 'gatt', name: widget.name)));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.bolt, color: Color(0xFFF57C00)),
+              title: const Text('自定义按钮'),
+              subtitle: const Text('命令编辑 / 导入导出 / 云端同步'),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const FastCmdPage()));
+              },
+            ),
+            // 翻译开关（从日志工具栏挪过来，避免把那行撑出溢出警告）
+            ListTile(
+              leading: const Icon(Icons.translate, color: Color(0xFFF57C00)),
+              title: const Text('hex翻译（接收区）'),
+              subtitle: Text(_translate
+                  ? '已开启：hex 解析成文本（再点还原，新数据不自动翻）'
+                  : '仅 hex 格式下可用，点一下翻译当前日志'),
+              trailing: Switch(
+                value: _translate && _codec == TextCodec.hex,
+                activeColor: const Color(0xFFF57C00),
+                onChanged: (v) {
+                  Navigator.pop(ctx);
+                  _setTranslate(v);
+                },
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _setTranslate(!_translate);
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.picture_in_picture,
+                color: FloatingLog.instance.isShowing
+                    ? Colors.green
+                    : const Color(0xFFF57C00),
+              ),
+              title: const Text('悬浮日志'),
+              subtitle: const Text('置顶小窗：可拖动/缩放/最大化/复制'),
+              onTap: () {
+                Navigator.pop(ctx);
+                FloatingLog.instance.toggle(context);
               },
             ),
           ],
@@ -732,7 +746,7 @@ class _DevicePageState extends State<DevicePage> {
                         children: [
                           _ServicesTab(
                             session: session,
-                            onWrite: _showWriteDialog,
+                            onToggleTarget: _toggleTarget,
                             onRead: session.readChar,
                             onNotifyToggle: _toggleNotify,
                             onPickTarget: _pickTargetChar,
@@ -745,17 +759,7 @@ class _DevicePageState extends State<DevicePage> {
                             filterCtl: _filterCtl,
                             logScroll: _logScroll,
                             onFormat: (v) => setState(() => _codec = v),
-                            onTranslate: () {
-                              setState(() {
-                                _translate = !_translate;
-                                if (_translate) {
-                                  // 翻译只作用于点击时刻之前的日志，新收数据不自动翻译
-                                  _translateSnapshot = DateTime.now();
-                                } else {
-                                  _translateSnapshot = null;
-                                }
-                              });
-                            },
+                            onTranslate: () => _setTranslate(!_translate),
                           ),
                         ],
                       ),
@@ -982,14 +986,14 @@ enum _WriteType { defaultWrite, noResponse, signed }
 // ---------------- 蓝牙服务 Tab（SelectionArea：长按任意文字可复制；展开状态记忆） ----------------
 class _ServicesTab extends StatefulWidget {
   final DeviceSession session;
-  final Future<void> Function(BluetoothCharacteristic) onWrite;
+  final void Function(BluetoothCharacteristic) onToggleTarget;
   final Future<void> Function(BluetoothCharacteristic) onRead;
   final Future<void> Function(BluetoothCharacteristic, bool) onNotifyToggle;
   final VoidCallback onPickTarget;
 
   const _ServicesTab({
     required this.session,
-    required this.onWrite,
+    required this.onToggleTarget,
     required this.onRead,
     required this.onNotifyToggle,
     required this.onPickTarget,
@@ -1070,7 +1074,7 @@ class _ServicesTabState extends State<_ServicesTab>
                         _CharTile(
                           session: session,
                           char: c,
-                          onWrite: () => widget.onWrite(c),
+                          onToggleTarget: () => widget.onToggleTarget(c),
                           onRead: () => widget.onRead(c),
                           onNotifyToggle: (v) =>
                               widget.onNotifyToggle(c, v),
@@ -1095,7 +1099,7 @@ class _ServicesTabState extends State<_ServicesTab>
 class _CharTile extends StatelessWidget {
   final DeviceSession session;
   final BluetoothCharacteristic char;
-  final VoidCallback onWrite;
+  final VoidCallback onToggleTarget;
   final VoidCallback onRead;
   final VoidCallback onPickTarget;
   final Future<void> Function(bool) onNotifyToggle;
@@ -1104,7 +1108,7 @@ class _CharTile extends StatelessWidget {
   const _CharTile({
     required this.session,
     required this.char,
-    required this.onWrite,
+    required this.onToggleTarget,
     required this.onRead,
     required this.onNotifyToggle,
     required this.onPickTarget,
@@ -1158,7 +1162,7 @@ class _CharTile extends StatelessWidget {
         children: [
           if (writable)
             IconButton(
-              // 只有当前发送目标才"点亮"（填充橙色），其余灰色描边
+              // 发送通道开关：当前是发送目标 → 点亮（填充橙色），再点一下取消
               icon: Icon(
                 isTarget ? Icons.upload : Icons.upload_outlined,
                 color: isTarget
@@ -1167,10 +1171,9 @@ class _CharTile extends StatelessWidget {
                 size: 20,
               ),
               tooltip: isTarget
-                  ? '写入（当前发送目标）'
-                  : '写入（点击后设为发送目标）',
-              onPressed: onWrite,
-              onLongPress: onPickTarget,
+                  ? '取消发送通道（点一下取消点亮）'
+                  : '设为发送通道（点一下点亮，再点取消）',
+              onPressed: onToggleTarget,
             ),
           if (readable)
             IconButton(
@@ -1180,18 +1183,23 @@ class _CharTile extends StatelessWidget {
               onPressed: onRead,
             ),
           if (notifiable)
-            Builder(builder: (_) {
-              final on = s.notifyState[char.uuid.str.toLowerCase()] ?? false;
-              return IconButton(
-                icon: Icon(
-                  on ? Icons.notifications_active : Icons.notifications_none,
-                  color: on ? const Color(0xFFF57C00) : Colors.grey,
-                  size: 20,
-                ),
-                tooltip: on ? '关闭通知' : '开启通知',
-                onPressed: () => onNotifyToggle(!on),
-              );
-            }),
+            // ValueListenableBuilder：点铃铛立即点亮/熄灭，不用刷新页面
+            ValueListenableBuilder<int>(
+              valueListenable: s.notifyBump,
+              builder: (_, __, ___) {
+                final on =
+                    s.notifyState[char.uuid.str.toLowerCase()] ?? false;
+                return IconButton(
+                  icon: Icon(
+                    on ? Icons.notifications_active : Icons.notifications_none,
+                    color: on ? const Color(0xFFF57C00) : Colors.grey,
+                    size: 20,
+                  ),
+                  tooltip: on ? '关闭通知' : '开启通知',
+                  onPressed: () => onNotifyToggle(!on),
+                );
+              },
+            ),
         ],
       ),
     );
@@ -1266,9 +1274,6 @@ class _LogTabState extends State<_LogTab> with AutomaticKeepAliveClientMixin {
                 onChanged: (v) =>
                     widget.onFormat(v ?? TextCodec.hex),
               ),
-              const SizedBox(width: 8),
-              // 翻译按钮：仅 hex 状态下可用，点一下把 hex 解析成文本（带背景色）
-              _translateChip(),
               const SizedBox(width: 8),
               _toggleChip('自动滚动', _autoScroll,
                   (v) => setState(() => _autoScroll = v)),
@@ -1519,30 +1524,6 @@ class _LogTabState extends State<_LogTab> with AutomaticKeepAliveClientMixin {
             widget.translateSnapshot != null &&
             !list[i].time.isAfter(widget.translateSnapshot!),
         onLongPress: () => _showExportSheet(list[i], list),
-      ),
-    );
-  }
-
-  /// 翻译开关（仅 hex 状态可用）：点一下把当前日志的 hex 翻译成文本，再点还原
-  Widget _translateChip() {
-    final enabled = widget.codec == TextCodec.hex;
-    final on = enabled && widget.translate;
-    return GestureDetector(
-      onTap: enabled ? widget.onTranslate : null,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: !enabled
-              ? Colors.grey.shade200
-              : (on ? const Color(0xFFF57C00) : Colors.grey.shade400),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Text('翻译',
-            style: TextStyle(
-                fontSize: 12,
-                color: !enabled
-                    ? Colors.grey
-                    : (on ? Colors.white : Colors.black54))),
       ),
     );
   }

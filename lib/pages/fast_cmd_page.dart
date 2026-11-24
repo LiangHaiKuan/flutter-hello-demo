@@ -359,11 +359,14 @@ class _FastCmdPageState extends State<FastCmdPage> {
   // ---------- 云端同步 ----------
   Future<void> _cloudRead(String link) async {
     _toast('正在读取云端...');
+    _engine.logEvent('', '云端读取开始: $link');
     final client = NotepadClient();
+    client.onLog = (m) => _engine.logEvent('', '云端: $m');
     try {
       final text = await client.readNote(link);
       await _confirmImport(parseFastCmds(text), '云端读取');
     } catch (e) {
+      _engine.logEvent('', '云端读取失败: $e');
       _toast('云端读取失败: $e');
     } finally {
       client.dispose();
@@ -379,11 +382,15 @@ class _FastCmdPageState extends State<FastCmdPage> {
         .map((e) => e.value.exportLine(e.key + 1))
         .join('\n');
     _toast('正在覆盖写入云端...');
+    _engine.logEvent('', '云端写入开始: $link（${list.length} 条）');
     final client = NotepadClient();
+    client.onLog = (m) => _engine.logEvent('', '云端: $m');
     try {
       await client.writeNote(link, text);
+      _engine.logEvent('', '云端写入成功: ${list.length} 条');
       _toast('云端已覆盖写入 ${list.length} 条命令');
     } catch (e) {
+      _engine.logEvent('', '云端写入失败: $e');
       _toast('云端写入失败: $e');
     } finally {
       client.dispose();
