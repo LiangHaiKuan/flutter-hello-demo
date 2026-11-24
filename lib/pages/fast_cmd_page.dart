@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 
 import '../core/ble_util.dart';
 import '../models/models.dart';
@@ -190,6 +193,70 @@ class _FastCmdPageState extends State<FastCmdPage> {
     _toast('导入 ${parsed.length} 条命令');
   }
 
+  /// 从 txt 文件导入（对标原版导入文件功能）
+  Future<void> _importFromFile() async {
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['txt', 'cmds'],
+      );
+      if (res == null || res.files.isEmpty) return;
+      final path = res.files.single.path;
+      if (path == null) {
+        _toast('无法读取所选文件');
+        return;
+      }
+      final raw = await File(path).readAsString();
+      final parsed = parseFastCmds(raw);
+      if (parsed.isEmpty) {
+        _toast('文件内容不是有效的 fast_cmds 格式');
+        return;
+      }
+      final base = _engine.cmds.length;
+      for (var i = 0; i < parsed.length; i++) {
+        parsed[i].order = base + i;
+      }
+      _engine.cmds.addAll(parsed);
+      await _engine.saveCmds();
+      _engine.cmdsBump.value++;
+      setState(() {});
+      _toast('已从文件导入 ${parsed.length} 条命令');
+    } catch (e) {
+      _toast('导入失败: $e');
+    }
+  }
+
+  /// 导入入口：弹菜单选 文件/剪贴板
+  void _showImportSheet() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.folder_open, color: Color(0xFFF57C00)),
+              title: const Text('从文件导入（选择 fast_cmds 格式 txt）'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _importFromFile();
+              },
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.content_paste, color: Color(0xFFF57C00)),
+              title: const Text('从剪贴板导入'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _importCmds();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -199,9 +266,13 @@ class _FastCmdPageState extends State<FastCmdPage> {
         actions: [
           IconButton(
               icon: const Icon(Icons.add), tooltip: '添加', onPressed: _editCmd),
+          // 导入按钮常驻（修复：进入编辑模式后找不到导入入口的问题）
           TextButton(
-              onPressed: _importCmds,
+              onPressed: _showImportSheet,
               child: const Text('导入', style: TextStyle(color: Colors.white))),
+          TextButton(
+              onPressed: _exportCmds,
+              child: const Text('导出', style: TextStyle(color: Colors.white))),
           TextButton(
               onPressed: () {
                 setState(() => _editMode = !_editMode);

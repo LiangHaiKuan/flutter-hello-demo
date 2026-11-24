@@ -37,11 +37,19 @@ class _DevicePageState extends State<DevicePage> {
   void initState() {
     super.initState();
     _session = _engine.sessionOf(widget.mac);
-    _sendCtl.text = 'aa00bb11cc22';
+    // 监听会话变化：断开/移除时自动刷新（修复断开后界面卡死问题）
+    _engine.sessionsBump.addListener(_onSessionsChanged);
+    _session?.state.addListener(_onSessionsChanged);
+  }
+
+  void _onSessionsChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _engine.sessionsBump.removeListener(_onSessionsChanged);
+    _session?.state.removeListener(_onSessionsChanged);
     _loopTimer?.cancel();
     _sendCtl.dispose();
     _delayCtl.dispose();
@@ -67,8 +75,11 @@ class _DevicePageState extends State<DevicePage> {
       _toast('请先在蓝牙服务页选择一个可写特征值');
       return;
     }
-    final withoutResponse =
-        _writeType == _WriteType.noResponse;
+    if (session.state.value != BluetoothConnectionState.connected) {
+      _toast('设备未连接');
+      return;
+    }
+    final withoutResponse = _writeType == _WriteType.noResponse;
     await session.send(bytes, withoutResponse);
   }
 
@@ -298,7 +309,20 @@ class _DevicePageState extends State<DevicePage> {
     if (_engine.sessionOf(widget.mac) == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('BLE调试助手')),
-        body: const Center(child: Text('设备未连接或连接已断开')),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('设备未连接或连接已断开',
+                  style: TextStyle(color: Colors.grey)),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('返回'),
+              ),
+            ],
+          ),
+        ),
       );
     }
     return DefaultTabController(
@@ -334,13 +358,9 @@ class _DevicePageState extends State<DevicePage> {
                 onPickTarget: _pickTargetChar),
             _LogTab(
               session: session,
-              autoScroll: _autoScroll,
-              showSend: _showSend,
               hexMode: _hexMode,
               filterCtl: _filterCtl,
               logScroll: _logScroll,
-              onToggleAuto: (v) => setState(() => _autoScroll = v),
-              onToggleShowSend: (v) => setState(() => _showSend = v),
               onFormat: (v) => setState(() => _hexMode = v),
             ),
           ],
@@ -427,34 +447,40 @@ class _DevicePageState extends State<DevicePage> {
                   ),
                 ],
               ),
-              Row(
+              // 用 Wrap 防止窄屏溢出（黄黑条纹就是布局溢出报错条，不是广告）
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 6,
+                runSpacing: 2,
                 children: [
                   _typeChip('Default', _WriteType.defaultWrite),
                   _typeChip('No Response', _WriteType.noResponse),
                   _typeChip('Signed', _WriteType.signed),
-                  const Spacer(),
-                  SizedBox(
-                    width: 60,
-                    child: CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: const Text('循环', style: TextStyle(fontSize: 12)),
-                      value: _loopSend,
-                      activeColor: const Color(0xFFF57C00),
-                      onChanged: _toggleLoop,
-                    ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: Checkbox(
+                          value: _loopSend,
+                          activeColor: const Color(0xFFF57C00),
+                          onChanged: _toggleLoop,
+                        ),
+                      ),
+                      const Text('循环', style: TextStyle(fontSize: 12)),
+                    ],
                   ),
                   const Text('延时(ms):', style: TextStyle(fontSize: 12)),
                   SizedBox(
-                    width: 50,
+                    width: 46,
                     child: TextField(
                       controller: _delayCtl,
                       keyboardType: TextInputType.number,
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       style: const TextStyle(fontSize: 12),
-                      decoration:
-                          const InputDecoration(isDense: true, border: UnderlineInputBorder()),
+                      decoration: const InputDecoration(
+                          isDense: true, border: UnderlineInputBorder()),
                     ),
                   ),
                 ],
@@ -547,7 +573,7 @@ class _ServicesTab extends StatelessWidget {
               data: Theme.of(context)
                   .copyWith(dividerColor: Colors.transparent),
               child: ExpansionTile(
-                initiallyExpanded: true,
+                initiallyExpanded: false, // 默认收起，用户主动展开/订阅（对标原版）
                 tilePadding:
                     const EdgeInsets.symmetric(horizontal: 16),
                 childrenPadding:
@@ -682,34 +708,36 @@ class _CharTile extends StatelessWidget {
   }
 }
 
-// ---------------- 实时日志 Tab ----------------
-class _LogTab extends StatelessWidget {
+// ---------------- 实时日志 Tab（有状态：支持暂停/清屏/清零/长按导出） ----------------
+class _LogTab extends StatefulWidget {
   final DeviceSession session;
-  final bool autoScroll;
-  final bool showSend;
   final bool hexMode;
   final TextEditingController filterCtl;
   final ScrollController logScroll;
-  final ValueChanged<bool> onToggleAuto;
-  final ValueChanged<bool> onToggleShowSend;
   final ValueChanged<bool> onFormat;
 
   const _LogTab({
     required this.session,
-    required this.autoScroll,
-    required this.showSend,
     required this.hexMode,
     required this.filterCtl,
     required this.logScroll,
-    required this.onToggleAuto,
-    required this.onToggleShowSend,
     required this.onFormat,
   });
+
+  @override
+  State<_LogTab> createState() => _LogTabState();
+}
+
+class _LogTabState extends State<_LogTab> {
+  bool _autoScroll = true;
+  bool _showSend = true;
+  bool _paused = false;
+  List<LogEntry> _pausedList = [];
 
   bool _match(LogEntry e, String kw) {
     if (kw.isEmpty) return true;
     final lower = kw.toLowerCase();
-    final text = hexMode
+    final text = widget.hexMode
         ? HexUtil.toHex(e.bytes).toLowerCase()
         : HexUtil.toAscii(e.bytes).toLowerCase();
     return text.contains(lower) ||
@@ -717,16 +745,112 @@ class _LogTab extends StatelessWidget {
         (e.message ?? '').toLowerCase().contains(lower);
   }
 
+  List<LogEntry> _visible(List<LogEntry> allLogs) {
+    final kw = widget.filterCtl.text;
+    return allLogs
+        .where((e) => _match(e, kw))
+        .where((e) =>
+            e.dir == LogDir.event ||
+            (_showSend
+                ? true
+                : (e.dir != LogDir.sendOk && e.dir != LogDir.sendFail)))
+        .toList();
+  }
+
+  // ---------- 导出 ----------
+  void _exportLogs(List<LogEntry> list, _ExportMode mode) {
+    final sb = StringBuffer();
+    for (final e in list) {
+      if (e.dir == LogDir.event) continue;
+      if (mode == _ExportMode.hexTs) {
+        sb.write('${e.timeStr}  ${e.dirStr} [${e.tag}] ');
+        sb.writeln(HexUtil.toHex(e.bytes));
+      } else if (mode == _ExportMode.hex) {
+        sb.writeln(HexUtil.toHex(e.bytes));
+      } else {
+        sb.writeln(HexUtil.toAscii(e.bytes));
+      }
+    }
+    Clipboard.setData(ClipboardData(text: sb.toString()));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('已导出 ${list.length} 条数据到剪贴板'),
+        duration: const Duration(milliseconds: 800)));
+  }
+
+  void _showExportSheet(LogEntry? single, List<LogEntry> all) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(single == null ? '导出全部接收/发送数据' : '导出数据',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            if (single != null) ...[
+              ListTile(
+                leading: const Icon(Icons.copy, size: 20),
+                title: const Text('复制本条（16进制）'),
+                onTap: () {
+                  Clipboard.setData(
+                      ClipboardData(text: HexUtil.toHex(single.bytes)));
+                  Navigator.pop(ctx);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.copy, size: 20),
+                title: const Text('复制本条（ASCII）'),
+                onTap: () {
+                  Clipboard.setData(
+                      ClipboardData(text: HexUtil.toAscii(single.bytes)));
+                  Navigator.pop(ctx);
+                },
+              ),
+            ],
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.file_download, size: 20),
+              title: const Text('导出全部（16进制，不带时间戳）'),
+              onTap: () {
+                _exportLogs(all, _ExportMode.hex);
+                Navigator.pop(ctx);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.file_download, size: 20),
+              title: const Text('导出全部（16进制，带时间戳）'),
+              onTap: () {
+                _exportLogs(all, _ExportMode.hexTs);
+                Navigator.pop(ctx);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.file_download, size: 20),
+              title: const Text('导出全部（ASCII）'),
+              onTap: () {
+                _exportLogs(all, _ExportMode.ascii);
+                Navigator.pop(ctx);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final engine = BleEngine.instance;
+    final session = widget.session;
     return Column(
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           child: TextField(
-            controller: filterCtl,
-            onChanged: (_) => engine.cmdsBump.value++, // 触发列表刷新
+            controller: widget.filterCtl,
+            onChanged: (_) => setState(() {}),
             decoration: const InputDecoration(
               isDense: true,
               hintText: '过滤关键字(不区分大小写)',
@@ -739,24 +863,41 @@ class _LogTab extends StatelessWidget {
           child: Row(
             children: [
               DropdownButton<bool>(
-                value: hexMode,
+                value: widget.hexMode,
                 underline: const SizedBox.shrink(),
                 items: const [
                   DropdownMenuItem(value: true, child: Text('hex')),
                   DropdownMenuItem(value: false, child: Text('ascii')),
                 ],
-                onChanged: (v) => onFormat(v ?? true),
+                onChanged: (v) => widget.onFormat(v ?? true),
               ),
               const SizedBox(width: 8),
-              _toggleChip('自动滚动', autoScroll, onToggleAuto),
+              _toggleChip('自动滚动', _autoScroll,
+                  (v) => setState(() => _autoScroll = v)),
               const SizedBox(width: 8),
-              _toggleChip('显示发送', showSend, onToggleShowSend),
+              _toggleChip('显示发送', _showSend,
+                  (v) => setState(() => _showSend = v)),
               const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.clear_all, size: 20),
-                tooltip: '清空日志',
-                onPressed: engine.clearLogs,
-              ),
+              // 暂停/清屏/清零（对标原版）
+              _ctlBtn(_paused ? Icons.play_arrow : Icons.pause,
+                  _paused ? '继续' : '暂停', () {
+                setState(() {
+                  if (!_paused) {
+                    _pausedList = _visible(engine.logs.value);
+                  }
+                  _paused = !_paused;
+                });
+              }),
+              _ctlBtn(Icons.clear_all, '清屏', () {
+                engine.clearLogs();
+                setState(() {
+                  _paused = false;
+                  _pausedList = [];
+                });
+              }),
+              _ctlBtn(Icons.exposure_zero, '清零', () {
+                session.resetStats();
+              }),
             ],
           ),
         ),
@@ -783,39 +924,39 @@ class _LogTab extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: ValueListenableBuilder<List<LogEntry>>(
-            valueListenable: engine.logs,
-            builder: (_, allLogs, ___) {
-              final kw = filterCtl.text;
-              final list = allLogs
-                  .where((e) => _match(e, kw))
-                  .where((e) =>
-                      e.dir == LogDir.event ||
-                      (showSend
-                          ? true
-                          : (e.dir != LogDir.sendOk &&
-                              e.dir != LogDir.sendFail)))
-                  .toList();
-              if (autoScroll) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (logScroll.hasClients) {
-                    logScroll.jumpTo(logScroll.position.maxScrollExtent);
-                  }
-                });
-              }
-              if (list.isEmpty) {
-                return const Center(
-                    child: Text('暂无日志', style: TextStyle(color: Colors.grey)));
-              }
-              return ListView.builder(
-                controller: logScroll,
-                itemCount: list.length,
-                itemBuilder: (_, i) => _logLine(list[i]),
-              );
-            },
-          ),
+          child: _paused
+              ? _buildList(_pausedList)
+              : ValueListenableBuilder<List<LogEntry>>(
+                  valueListenable: engine.logs,
+                  builder: (_, allLogs, ___) =>
+                      _buildList(_visible(allLogs)),
+                ),
         ),
       ],
+    );
+  }
+
+  Widget _buildList(List<LogEntry> list) {
+    if (_autoScroll && !_paused) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (widget.logScroll.hasClients) {
+          widget.logScroll
+              .jumpTo(widget.logScroll.position.maxScrollExtent);
+        }
+      });
+    }
+    if (list.isEmpty) {
+      return const Center(
+          child: Text('暂无日志', style: TextStyle(color: Colors.grey)));
+    }
+    return ListView.builder(
+      controller: widget.logScroll,
+      itemCount: list.length,
+      itemBuilder: (_, i) => _LogLine(
+        entry: list[i],
+        hexMode: widget.hexMode,
+        onLongPress: () => _showExportSheet(list[i], list),
+      ),
     );
   }
 
@@ -835,7 +976,39 @@ class _LogTab extends StatelessWidget {
     );
   }
 
-  Widget _logLine(LogEntry e) {
+  Widget _ctlBtn(IconData icon, String tip, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: Colors.black54),
+            Text(tip, style: const TextStyle(fontSize: 9)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+enum _ExportMode { hex, hexTs, ascii }
+
+class _LogLine extends StatelessWidget {
+  final LogEntry entry;
+  final bool hexMode;
+  final VoidCallback onLongPress;
+
+  const _LogLine({
+    required this.entry,
+    required this.hexMode,
+    required this.onLongPress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final e = entry;
     final Color dirColor;
     switch (e.dir) {
       case LogDir.notify:
@@ -854,23 +1027,32 @@ class _LogTab extends StatelessWidget {
     }
     final content = e.dir == LogDir.event
         ? e.message ?? ''
-        : '${HexUtil.display(e.bytes, hexMode)}';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
-      child: Text.rich(
-        TextSpan(
-          style:
-              const TextStyle(fontSize: 12, fontFamily: 'monospace', height: 1.3),
-          children: [
-            TextSpan(text: '${e.timeStr}  ', style: const TextStyle(color: Colors.black54)),
-            if (e.tag.isNotEmpty)
-              TextSpan(text: '[$e.tag] ', style: const TextStyle(color: Colors.blueGrey)),
-            TextSpan(text: '${e.dirStr} ', style: TextStyle(color: dirColor)),
-            TextSpan(
-              text: content,
-              style: TextStyle(color: e.dir == LogDir.event ? Colors.black54 : dirColor),
-            ),
-          ],
+        : HexUtil.display(e.bytes, hexMode);
+    return InkWell(
+      onLongPress: e.dir == LogDir.event ? null : onLongPress,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
+        child: Text.rich(
+          TextSpan(
+            style: const TextStyle(
+                fontSize: 12, fontFamily: 'monospace', height: 1.3),
+            children: [
+              TextSpan(text: '${e.timeStr}  ',
+                  style: const TextStyle(color: Colors.black54)),
+              if (e.tag.isNotEmpty)
+                TextSpan(text: '[$e.tag] ',
+                    style: const TextStyle(color: Colors.blueGrey)),
+              TextSpan(text: '${e.dirStr} ',
+                  style: TextStyle(color: dirColor)),
+              TextSpan(
+                text: content,
+                style: TextStyle(
+                    color: e.dir == LogDir.event
+                        ? Colors.black54
+                        : dirColor),
+              ),
+            ],
+          ),
         ),
       ),
     );

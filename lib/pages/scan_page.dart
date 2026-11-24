@@ -5,6 +5,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../services/ble_engine.dart';
+import 'adv_data_page.dart';
 import 'device_page.dart';
 
 /// 扫描主页：可用设备 / 活动连接
@@ -18,6 +19,7 @@ class ScanPage extends StatefulWidget {
 class _ScanPageState extends State<ScanPage> {
   final BleEngine _engine = BleEngine.instance;
   Timer? _loopTimer;
+  bool _showFilter = true; // 过滤面板默认显示（对标原版）
 
   @override
   void initState() {
@@ -80,9 +82,11 @@ class _ScanPageState extends State<ScanPage> {
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.filter_list),
-              tooltip: '扫描过滤',
-              onPressed: () => Scaffold.of(context).openEndDrawer(),
+              icon: Icon(
+                  _showFilter ? Icons.filter_alt : Icons.filter_alt_outlined,
+                  color: _showFilter ? Colors.white : Colors.white70),
+              tooltip: '显示/隐藏过滤面板',
+              onPressed: () => setState(() => _showFilter = !_showFilter),
             ),
             PopupMenuButton<String>(
               onSelected: (v) {
@@ -100,9 +104,18 @@ class _ScanPageState extends State<ScanPage> {
             tabs: [Tab(text: '可用设备'), Tab(text: '活动连接')],
           ),
         ),
-        endDrawer: const _FilterDrawer(),
-        body: TabBarView(
-          children: [_AvailableTab(onLoopChanged: _scheduleLoop), _ActiveTab()],
+        body: Column(
+          children: [
+            if (_showFilter) _FilterPanel(),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  _AvailableTab(onLoopChanged: _scheduleLoop),
+                  _ActiveTab(),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -154,30 +167,161 @@ class _ScanPageState extends State<ScanPage> {
   }
 }
 
+// ---------------- 过滤面板（常驻顶部，对标原版布局） ----------------
+class _FilterPanel extends StatefulWidget {
+  @override
+  State<_FilterPanel> createState() => _FilterPanelState();
+}
+
+class _FilterPanelState extends State<_FilterPanel> {
+  final BleEngine _engine = BleEngine.instance;
+  late final TextEditingController _nameCtl;
+  late final TextEditingController _uuidCtl;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtl = TextEditingController(text: _engine.nameFilter);
+    _uuidCtl = TextEditingController(text: _engine.uuidFilter);
+  }
+
+  void _apply() => _engine.notifyFilters();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFFF2F2F2),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Column(
+        children: [
+          TextField(
+            controller: _nameCtl,
+            style: const TextStyle(fontSize: 14),
+            decoration: const InputDecoration(
+              isDense: true,
+              hintText: '根据名称或地址过滤',
+            ),
+            onChanged: (v) {
+              _engine.nameFilter = v;
+              _apply();
+            },
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _uuidCtl,
+            style: const TextStyle(fontSize: 14),
+            decoration: const InputDecoration(
+              isDense: true,
+              hintText: '0x 根据uuid过滤',
+            ),
+            onChanged: (v) {
+              _engine.uuidFilter = v;
+              _apply();
+            },
+          ),
+          _checkRow('只显示BLE设备', _engine.onlyBle, (v) {
+            _engine.onlyBle = v;
+            _apply();
+          }),
+          _checkRow('只显示名称不为空的', _engine.onlyNamed, (v) {
+            _engine.onlyNamed = v;
+            _apply();
+          }),
+          Row(
+            children: [
+              const Text('RSSI', style: TextStyle(fontSize: 14)),
+              Expanded(
+                child: Slider(
+                  activeColor: const Color(0xFFF57C00),
+                  min: -100,
+                  max: 0,
+                  divisions: 100,
+                  value: _engine.rssiThreshold.toDouble(),
+                  onChanged: (v) =>
+                      setState(() => _engine.rssiThreshold = v.round()),
+                  onChangeEnd: (_) => _apply(),
+                ),
+              ),
+              SizedBox(
+                width: 36,
+                child: Text('${_engine.rssiThreshold}',
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(fontSize: 13)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _checkRow(String label, bool value, ValueChanged<bool> onChanged) {
+    return Row(
+      children: [
+        Checkbox(
+          value: value,
+          onChanged: (v) {
+            setState(() => onChanged(v ?? false));
+          },
+        ),
+        Text(label, style: const TextStyle(fontSize: 14)),
+      ],
+    );
+  }
+}
+
 // ---------------- Tab1 可用设备 ----------------
-class _AvailableTab extends StatelessWidget {
+class _AvailableTab extends StatefulWidget {
   final VoidCallback onLoopChanged;
   const _AvailableTab({required this.onLoopChanged});
 
   @override
+  State<_AvailableTab> createState() => _AvailableTabState();
+}
+
+class _AvailableTabState extends State<_AvailableTab> {
+  final BleEngine _engine = BleEngine.instance;
+  Timer? _sortTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // 每 3 秒强制刷新一次，保证按信号强度重新排列（对标原版）
+    _sortTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _sortTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final engine = BleEngine.instance;
     return ValueListenableBuilder<List<ScanResult>>(
-      valueListenable: engine.scanResults,
+      valueListenable: _engine.scanResults,
       builder: (_, results, __) {
-        if (results.isEmpty) {
-          return const Center(
-            child: Text('未发现设备，请确认设备已打开广播',
-                style: TextStyle(color: Colors.grey)),
-          );
-        }
-        return ListView.separated(
-          itemCount: results.length,
-          separatorBuilder: (_, __) =>
-              const Divider(height: 1, indent: 16, endIndent: 16),
-          itemBuilder: (_, i) {
-            final r = results[i];
-            return _DeviceCard(result: r);
+        return ValueListenableBuilder<int>(
+          valueListenable: _engine.filterBump,
+          builder: (_, ___, ____) {
+            final filtered = _engine.applyFilters(results);
+            if (filtered.isEmpty) {
+              return const Center(
+                child: Text('未发现设备，请确认设备已打开广播',
+                    style: TextStyle(color: Colors.grey)),
+              );
+            }
+            return ListView.separated(
+              itemCount: filtered.length,
+              separatorBuilder: (_, __) =>
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+              itemBuilder: (_, i) {
+                final r = filtered[i];
+                return _DeviceCard(result: r);
+              },
+            );
           },
         );
       },
@@ -198,7 +342,14 @@ class _DeviceCard extends StatelessWidget {
         result.advertisementData.advName.isNotEmpty
             ? result.advertisementData.advName
             : '未知设备';
-    final connectable = result.advertisementData.connectable;
+
+    // 连接状态（对标原版：未连接灰色，连上才能操作）
+    final session = engine.sessions[mac];
+    final isConnected = session != null &&
+        session.state.value == BluetoothConnectionState.connected;
+    final isConnecting = session != null && !isConnected;
+
+    final iconColor = isConnected ? const Color(0xFFF57C00) : Colors.grey;
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -207,65 +358,111 @@ class _DeviceCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF57C00),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.bluetooth, color: Colors.white, size: 20),
-                  Text('BLE',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 8,
-                          fontWeight: FontWeight.bold)),
-                ],
+            // 点图标 → 广播数据页（对标原版广播数据入口）
+            GestureDetector(
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => AdvDataPage(mac: mac, name: name),
+              )),
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: iconColor.withAlpha(isConnected ? 40 : 30),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.bluetooth, color: iconColor, size: 20),
+                    Text('BLE',
+                        style: TextStyle(
+                            color: iconColor,
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold)),
+                  ],
+                ),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 2),
-                  Text(mac,
-                      style:
-                          const TextStyle(fontSize: 12, color: Colors.grey)),
-                  const SizedBox(height: 2),
-                  Text(
-                    connectable ? '未配对    可连接' : '仅广播',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
+              child: GestureDetector(
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => AdvDataPage(mac: mac, name: name),
+                )),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: isConnected
+                                ? Colors.black87
+                                : Colors.black38)),
+                    const SizedBox(height: 2),
+                    Text(mac,
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey)),
+                    const SizedBox(height: 2),
+                    Text(
+                      isConnected
+                          ? '已连接'
+                          : (isConnecting ? '连接中...' : '未连接'),
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: isConnected
+                              ? Colors.green
+                              : Colors.grey),
+                    ),
+                  ],
+                ),
               ),
             ),
             Text('${result.rssi} dBm',
                 style: const TextStyle(fontSize: 12, color: Colors.grey)),
             const SizedBox(width: 12),
+            // 广播数据小图标
+            IconButton(
+              icon: const Icon(Icons.bar_chart, size: 20, color: Colors.grey),
+              tooltip: '广播数据',
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => AdvDataPage(mac: mac, name: name),
+              )),
+            ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFF57C00),
+                backgroundColor: isConnected
+                    ? Colors.green
+                    : (isConnecting
+                        ? Colors.grey
+                        : const Color(0xFFF57C00)),
                 foregroundColor: Colors.white,
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
               ),
-              onPressed: () async {
-                await engine.connect(dev);
-                if (!context.mounted) return;
-                Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => DevicePage(mac: mac, name: name),
-                ));
-              },
-              child: const Text('连接'),
+              onPressed: isConnecting
+                  ? null
+                  : () async {
+                      if (isConnected) {
+                        // 已连接：直接进入设备页
+                        if (!context.mounted) return;
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => DevicePage(mac: mac, name: name),
+                        ));
+                      } else {
+                        // 发起连接并立即进入设备页（页内显示"连接中"）
+                        engine.connect(dev);
+                        if (!context.mounted) return;
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => DevicePage(mac: mac, name: name),
+                        ));
+                      }
+                    },
+              child: Text(isConnected
+                  ? '进入'
+                  : (isConnecting ? '连接中' : '连接')),
             ),
           ],
         ),
@@ -299,144 +496,69 @@ class _ActiveTab extends StatelessWidget {
             final s = sessions[i];
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: ListTile(
-                leading: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Colors.green.withAlpha(40),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.link, color: Colors.green),
-                ),
-                title: Text(s.name,
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text(s.mac),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    ValueListenableBuilder<int>(
-                      valueListenable: s.rssi,
-                      builder: (_, r, __) => r > 0
-                          ? Text('$r dBm',
-                              style: const TextStyle(
-                                  fontSize: 12, color: Colors.grey))
-                          : const SizedBox.shrink(),
+              child: ValueListenableBuilder<BluetoothConnectionState>(
+                valueListenable: s.state,
+                builder: (_, st, ___) {
+                  final connected =
+                      st == BluetoothConnectionState.connected;
+                  final color = connected ? Colors.green : Colors.grey;
+                  return ListTile(
+                    leading: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: color.withAlpha(40),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                          connected ? Icons.link : Icons.link_off,
+                          color: color),
                     ),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () => s.disconnect(),
-                      child: const Text('断开',
-                          style: TextStyle(color: Colors.redAccent)),
+                    title: Text(
+                      s.name,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: connected
+                            ? Colors.black87
+                            : Colors.black38, // 断开变灰
+                      ),
                     ),
-                  ],
-                ),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) =>
-                      DevicePage(mac: s.mac, name: s.name),
-                )),
+                    subtitle: Text(
+                        '${s.mac}  ·  ${connected ? "已连接" : "未连接/断开"}',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: connected
+                                ? Colors.grey
+                                : Colors.grey.shade400)),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ValueListenableBuilder<int>(
+                          valueListenable: s.rssi,
+                          builder: (_, r, __) => connected && r > 0
+                              ? Text('$r dBm',
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Colors.grey))
+                              : const SizedBox.shrink(),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: () => s.disconnect(),
+                          child: const Text('断开',
+                              style: TextStyle(color: Colors.redAccent)),
+                        ),
+                      ],
+                    ),
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) =>
+                          DevicePage(mac: s.mac, name: s.name),
+                    )),
+                  );
+                },
               ),
             );
           },
         );
-      },
-    );
-  }
-}
-
-// ---------------- 过滤抽屉 ----------------
-class _FilterDrawer extends StatefulWidget {
-  const _FilterDrawer();
-
-  @override
-  State<_FilterDrawer> createState() => _FilterDrawerState();
-}
-
-class _FilterDrawerState extends State<_FilterDrawer> {
-  final BleEngine _engine = BleEngine.instance;
-  late final TextEditingController _nameCtl;
-  late final TextEditingController _uuidCtl;
-
-  @override
-  void initState() {
-    super.initState();
-    _nameCtl = TextEditingController(text: _engine.nameFilter);
-    _uuidCtl = TextEditingController(text: _engine.uuidFilter);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Drawer(
-      backgroundColor: const Color(0xFFF2F2F2),
-      child: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            TextField(
-              controller: _nameCtl,
-              decoration: const InputDecoration(hintText: '根据名称或地址过滤'),
-              onChanged: (v) => _engine.nameFilter = v,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _uuidCtl,
-              decoration: const InputDecoration(hintText: '0x 根据uuid过滤'),
-              onChanged: (v) => _engine.uuidFilter = v,
-            ),
-            const SizedBox(height: 8),
-            _checkTile('只显示BLE设备', _engine.onlyBle,
-                (v) => _engine.onlyBle = v ?? true),
-            // 收藏功能二期实现
-            _checkTile('只显示名称不为空的', _engine.onlyNamed,
-                (v) => _engine.onlyNamed = v ?? false),
-            Row(
-              children: [
-                const Text('RSSI'),
-                Expanded(
-                  child: Slider(
-                    activeColor: const Color(0xFFF57C00),
-                    min: -100,
-                    max: 0,
-                    divisions: 100,
-                    value: _engine.rssiThreshold.toDouble(),
-                    onChanged: (v) {
-                      setState(() => _engine.rssiThreshold = v.round());
-                    },
-                  ),
-                ),
-                Text('${_engine.rssiThreshold}'),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Center(
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFF57C00),
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  // 触发一次过滤重算
-                  BleEngine.instance.startScan();
-                },
-                child: const Text('应用过滤并重新扫描'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _checkTile(String label, bool value, ValueChanged<bool?> onChanged) {
-    return CheckboxListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(label),
-      value: value,
-      controlAffinity: ListTileControlAffinity.leading,
-      activeColor: const Color(0xFFF57C00),
-      onChanged: (v) {
-        setState(() => onChanged(v));
       },
     );
   }

@@ -104,6 +104,16 @@ class DeviceSession {
     await device.disconnect();
   }
 
+  /// 统计清零
+  void resetStats() {
+    recvPkts = 0;
+    recvBytes = 0;
+    sentOkPkts = 0;
+    sentOkBytes = 0;
+    sentFailPkts = 0;
+    statsBump.value++;
+  }
+
   /// 开关通知
   Future<bool> setNotify(BluetoothCharacteristic c, bool enable) async {
     try {
@@ -193,7 +203,18 @@ class BleEngine {
   static final BleEngine instance = BleEngine._();
 
   final ValueNotifier<bool> scanning = ValueNotifier(false);
+
+  /// 去重后、按 RSSI 排序的原始扫描结果（未过滤，过滤在 UI 层做）
   final ValueNotifier<List<ScanResult>> scanResults = ValueNotifier([]);
+
+  /// 每台设备最新一次广播（广播数据页用）
+  final Map<String, ScanResult> latestResults = {};
+
+  /// 每台设备的 RSSI 历史曲线（广播数据页画图用）
+  final Map<String, List<int>> rssiHistory = {};
+
+  /// 过滤条件变化时 +1，通知扫描页重算
+  final ValueNotifier<int> filterBump = ValueNotifier(0);
 
   /// 会话，key = mac
   final Map<String, DeviceSession> sessions = {};
@@ -259,11 +280,23 @@ class BleEngine {
   void bindScanStreams() {
     FlutterBluePlus.isScanning.listen((s) => scanning.value = s);
     FlutterBluePlus.scanResults.listen((results) {
-      scanResults.value = _filterResults(results);
+      final map = <String, ScanResult>{};
+      for (final r in results) {
+        final mac = r.device.remoteId.str;
+        map[mac] = r;
+        latestResults[mac] = r;
+        final h = rssiHistory.putIfAbsent(mac, () => []);
+        h.add(r.rssi);
+        if (h.length > 300) h.removeRange(0, h.length - 300);
+      }
+      final list = map.values.toList()
+        ..sort((a, b) => b.rssi.compareTo(a.rssi));
+      scanResults.value = list;
     });
   }
 
-  List<ScanResult> _filterResults(List<ScanResult> input) {
+  /// UI 层调用：按当前过滤条件筛选扫描结果（返回新列表，已按 RSSI 降序）
+  List<ScanResult> applyFilters(List<ScanResult> input) {
     final map = <String, ScanResult>{};
     for (final r in input) {
       final mac = r.device.remoteId.str;
@@ -299,6 +332,9 @@ class BleEngine {
       ..sort((a, b) => b.rssi.compareTo(a.rssi));
     return list;
   }
+
+  /// 过滤条件变化后调用，让扫描页立即重算
+  void notifyFilters() => filterBump.value++;
 
   // ---- 连接 ----
   DeviceSession? sessionOf(String mac) => sessions[mac];
