@@ -91,6 +91,7 @@ class _ScanPageState extends State<ScanPage> {
                 if (v == 'peripheral') _openPeripheralMode();
                 if (v == 'autofeat') _showAutoFeatureSettings();
                 if (v == 'log') FloatingLog.instance.toggle(context);
+                if (v == 'changelog') _showChangelog();
               },
               itemBuilder: (_) => const [
                 PopupMenuItem(value: 'scan', child: Text('扫描设置')),
@@ -125,6 +126,46 @@ class _ScanPageState extends State<ScanPage> {
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => const PeripheralConfigPage(),
     ));
+  }
+
+  // ---------- 更新内容（v1.6 起：三点菜单里可查版本号与每版改动） ----------
+  void _showChangelog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('BLE调试助手 $appVersion'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final v in appChangelog) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 4),
+                  child: Text(
+                    '${v['version']}（${v['date']}）'
+                    '${v['version'] == appVersion ? '  ← 当前版本' : ''}',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFF57C00)),
+                  ),
+                ),
+                for (final item in (v['items'] as List<dynamic>))
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8, bottom: 2),
+                    child: Text('· $item',
+                        style: const TextStyle(fontSize: 13)),
+                  ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
+        ],
+      ),
+    );
   }
 
   // ---------- 自动特征：连接后自动点亮发送目标 + 开通知 + 跳实时日志 ----------

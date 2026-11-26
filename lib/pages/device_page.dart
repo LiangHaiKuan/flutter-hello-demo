@@ -420,7 +420,7 @@ class _DevicePageState extends State<DevicePage> with TickerProviderStateMixin {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.bolt, color: Color(0xFFF57C00)),
+              leading: const Icon(Icons.grid_view, color: Color(0xFFF57C00)),
               title: const Text('自定义按钮'),
               subtitle: const Text('命令编辑 / 导入导出 / 云端同步'),
               onTap: () {
