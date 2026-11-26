@@ -36,6 +36,13 @@ jobs:
       - name: 覆盖 Manifest（注入蓝牙权限与应用名）
         run: cp ci/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
 
+      - name: 拷贝应用图标（mipmap 全套）
+        run: |
+          for d in ci/icons/mipmap-*; do
+            cp -r "$d" android/app/src/main/res/
+          done
+          ls android/app/src/main/res/
+
       - name: 提升 compileSdk 至 36（新插件要求）
         run: sed -i 's/flutter.compileSdkVersion/36/g' android/app/build.gradle || true
 

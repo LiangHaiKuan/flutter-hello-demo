@@ -107,6 +107,21 @@ class _AdvDataPageState extends State<AdvDataPage> {
   List<_AdStruct> _buildTable(AdvertisementData? adv) {
     if (adv == null) return const [];
     final list = <_AdStruct>[];
+    // Flags（0x01）
+    final flagsVal = adv.connectable ? 0x06 : 0x05;
+    list.add(_AdStruct(
+        len: 3,
+        type: 0x01,
+        value: [flagsVal],
+        note: 'Flags'));
+    // 完整设备名（0x09）
+    if (adv.advName.isNotEmpty) {
+      list.add(_AdStruct(
+          len: adv.advName.length + 1,
+          type: 0x09,
+          value: adv.advName.codeUnits,
+          note: 'Complete Local Name'));
+    }
     if (adv.txPowerLevel != null) {
       list.add(_AdStruct(
           len: 3,
@@ -181,6 +196,16 @@ class _AdvDataPageState extends State<AdvDataPage> {
           ],
         ),
         actions: [
+          // 连接按钮：不用退回主界面再点连接（v1.5）
+          Builder(
+            builder: (ctx) => TextButton(
+              onPressed: () => _connectDevice(ctx),
+              child: const Text('连接',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold)),
+            ),
+          ),
           PopupMenuButton<String>(
             onSelected: (v) {
               if (v == 'kb') {
@@ -189,9 +214,11 @@ class _AdvDataPageState extends State<AdvDataPage> {
                     MaterialPageRoute(
                         builder: (_) => const KnowledgePage(section: 'adv')));
               }
+              if (v == 'log') FloatingLog.instance.toggle(context);
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'kb', child: Text('广播包科普')),
+              PopupMenuItem(value: 'log', child: Text('悬浮日志')),
             ],
           ),
         ],
@@ -262,8 +289,175 @@ class _AdvDataPageState extends State<AdvDataPage> {
               style: TextStyle(fontSize: 11, color: Colors.grey)),
           const SizedBox(height: 6),
           _buildTranslateTable(adv),
+          const SizedBox(height: 16),
+          // ---------- Flags 逐位含义（TYPE=0x01） ----------
+          _buildFlagsSection(adv),
+          const SizedBox(height: 16),
+          // ---------- 广播包解读（面向初学者的白话总结） ----------
+          _buildSummarySection(adv),
         ],
       ),
+    );
+  }
+
+  // ---------- Flags 逐位含义 ----------
+  Widget _buildFlagsSection(AdvertisementData? adv) {
+    final flags = adv?.connectable == true ? 0x06 : 0x05;
+    const bitDefs = [
+      (0x01, 'LE Limited Discoverable', '有限可发现模式（短暂广播几秒钟）'),
+      (0x02, 'LE General Discoverable', '通用可发现模式（正常持续广播）'),
+      (0x04, 'BR/EDR Not Supported', '不支持经典蓝牙（纯 BLE 设备）'),
+      (0x08, 'Simultaneous LE+BR/EDR (Ctrl)', '控制器层同时支持 BLE + 经典蓝牙'),
+      (0x10, 'Simultaneous LE+BR/EDR (Host)', '主机层同时支持 BLE + 经典蓝牙'),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Flags（TYPE=0x01）逐位含义:',
+            style: TextStyle(fontSize: 14, color: Colors.black54)),
+        const SizedBox(height: 2),
+        Text('本设备 Flags = 0x${flags.toRadixString(16).padLeft(2, '0')}，'
+                '对应勾选了下面加粗的位：',
+            style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        const SizedBox(height: 6),
+        Table(
+          border: TableBorder.all(color: Colors.grey.shade400, width: 0.5),
+          columnWidths: const {
+            0: FlexColumnWidth(1),
+            1: FlexColumnWidth(2.4),
+            2: FlexColumnWidth(3.6),
+          },
+          children: [
+            const TableRow(
+              decoration: BoxDecoration(color: Color(0xFFF5F5F5)),
+              children: [
+                Padding(padding: EdgeInsets.all(6), child: Text('位',
+                    style: TextStyle(fontSize: 13, color: Colors.orange))),
+                Padding(padding: EdgeInsets.all(6), child: Text('名称',
+                    style: TextStyle(fontSize: 13, color: Colors.orange))),
+                Padding(padding: EdgeInsets.all(6), child: Text('含义',
+                    style: TextStyle(fontSize: 13, color: Colors.orange))),
+              ],
+            ),
+            for (final d in bitDefs)
+              TableRow(children: [
+                Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Text('0x${d.$1.toRadixString(16).padLeft(2, '0')}',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                            fontWeight: (flags & d.$1) != 0
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: (flags & d.$1) != 0
+                                ? const Color(0xFFF57C00)
+                                : Colors.grey))),
+                Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Text(d.$2,
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: (flags & d.$1) != 0
+                                ? FontWeight.bold
+                                : FontWeight.normal))),
+                Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Text(d.$3,
+                        style: const TextStyle(fontSize: 11))),
+              ]),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ---------- 广播包解读（白话总结：这个设备可能是什么、在干什么） ----------
+  Widget _buildSummarySection(AdvertisementData? adv) {
+    if (adv == null) return const SizedBox.shrink();
+    final bullets = <String>[];
+
+    // 名称解读
+    final name = adv.advName;
+    if (name.isNotEmpty) {
+      bullets.add('设备名「$name」——扫描列表里显示的就是它。');
+    }
+    // Flags
+    bullets.add(adv.connectable
+        ? 'Flags=0x06：这是一台「可连接的 BLE 设备」，正在等待别人来连接，同时不支持经典蓝牙。'
+        : 'Flags=0x05：这是一台「只广播不让人连的设备」（信标类，如传感器标签）。');
+    // 服务 UUID
+    if (adv.serviceUuids.isNotEmpty) {
+      final names = adv.serviceUuids
+          .map((g) => UuidNames.serviceName(g.str))
+          .join('、');
+      bullets.add('广播的服务：$names ——声明"我能提供这些服务"。看到熟悉的服务'
+          '（如 Battery 0x180F）就能猜出设备用途。');
+    }
+    // 服务数据
+    adv.serviceData.forEach((g, data) {
+      bullets.add('服务数据（${UuidNames.serviceName(g.str)}）：'
+          '${HexUtil.toHex(data)} ——通常是该服务的实时数据'
+          '（如电量、传感器读数），格式由服务定义决定。');
+    });
+    // 厂商数据
+    adv.manufacturerData.forEach((id, data) {
+      bullets.add('厂商自定义数据（厂商ID=0x${id.toRadixString(16).padLeft(4, '0').toUpperCase()}）：'
+          '${HexUtil.toHex(data)} ——格式厂家自己定，只有拿到他家协议文档才能完全解析；'
+          '常见用途：设备状态、传感器数据、iBeacon 定位、防丢器等。');
+    });
+    // 外观
+    if (adv.appearance != null && adv.appearance != 0) {
+      bullets.add('外观码 Appearance=0x${adv.appearance!.toRadixString(16)}：'
+          '蓝牙联盟分配的图标类别，可按码表查到设备大类（手环/鼠标/温度计等）。');
+    }
+    // 发射功率
+    if (adv.txPowerLevel != null) {
+      bullets.add('发射功率 ${adv.txPowerLevel} dBm：配合手机收到的 RSSI '
+          '（RSSI - 发射功率 ≈ 路径损耗）可以粗略估算距离。');
+    }
+    // 设备类型推测
+    String guess = '从以上信息推测：';
+    final n = name.toLowerCase();
+    if (adv.serviceUuids.map((g) => g.str).any((u) => u.contains('180f'))) {
+      guess += '带电量服务，';
+    }
+    if (n.contains('watch') || n.contains('band') || n.contains('ring')) {
+      guess += '名字含手表/手环关键词，多半是「穿戴设备」。';
+    } else if (adv.manufacturerData.isNotEmpty && n.isNotEmpty) {
+      guess += '带厂商自定义数据且持续广播，多半是「传感器/信标类设备」'
+          '（如温湿度计、防丢器、工卡）。';
+    } else if (adv.connectable) {
+      guess += '可连接的 BLE 外设，用途要连上后看服务列表才能确定。';
+    }
+    bullets.add(guess);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('广播包解读（白话版）:',
+            style: const TextStyle(fontSize: 14, color: Colors.black54)),
+        const SizedBox(height: 2),
+        const Text('按蓝牙联盟规范的通用含义逐条解读，初学者可以照着对照学习',
+            style: TextStyle(fontSize: 11, color: Colors.grey)),
+        const SizedBox(height: 6),
+        for (final b in bullets)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('• ',
+                    style:
+                        TextStyle(fontSize: 12, color: Color(0xFFF57C00))),
+                Expanded(
+                  child: Text(b,
+                      style: const TextStyle(fontSize: 12, height: 1.4)),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 
@@ -431,8 +625,10 @@ class _AdStruct {
 }
 
 // ---------------- RSSI 折线图（自绘，无第三方依赖） ----------------
+// v1.5：横轴改为时间轴 0~40 秒滑动窗口（每 10 秒一格），数据点按采样时刻落位，
+// 超过 40 秒的旧数据移出窗口。
 class _RssiChart extends StatelessWidget {
-  final List<int> values;
+  final List<RssiSample> values;
   const _RssiChart({required this.values});
 
   @override
@@ -448,13 +644,15 @@ class _RssiChart extends StatelessWidget {
 }
 
 class _RssiPainter extends CustomPainter {
-  final List<int> values;
+  final List<RssiSample> values;
   _RssiPainter({required this.values});
+
+  static const double windowSec = 40;
 
   @override
   void paint(Canvas canvas, Size size) {
     const top = -20.0, bottom = -100.0;
-    const padL = 36.0, padR = 36.0, padT = 8.0, padB = 16.0;
+    const padL = 36.0, padR = 36.0, padT = 8.0, padB = 18.0;
     final chartW = size.width - padL - padR;
     final chartH = size.height - padT - padB;
 
@@ -483,11 +681,21 @@ class _RssiPainter extends CustomPainter {
       tp.paint(canvas, Offset(padL - tp.width - 4, y - tp.height / 2));
       tp.paint(canvas, Offset(size.width - padR + 4, y - tp.height / 2));
     }
-    // 横轴
+    // 横轴：0 ~ 40 秒，每 10 秒一格
     canvas.drawLine(Offset(padL, padT), Offset(padL, size.height - padB),
         axisPaint);
     canvas.drawLine(Offset(padL, size.height - padB),
         Offset(size.width - padR, size.height - padB), axisPaint);
+    for (var sec = 0; sec <= 40; sec += 10) {
+      final x = padL + chartW * sec / windowSec;
+      canvas.drawLine(Offset(x, padT), Offset(x, size.height - padB), gridPaint);
+      final tp = TextPainter(
+        text: TextSpan(text: '${sec}s', style: textStyle),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas,
+          Offset(x - tp.width / 2, size.height - padB + 2));
+    }
 
     if (values.isEmpty) {
       final tp = TextPainter(
@@ -500,18 +708,19 @@ class _RssiPainter extends CustomPainter {
       return;
     }
 
-    // 数据点（最多取最近 120 个），x 均分；超出纵轴范围按边界绘制
-    final pts = values.length > 120
-        ? values.sublist(values.length - 120)
-        : values;
-    final n = pts.length;
+    // 数据点：按"距现在多少秒"落位，0s 在最右侧（滚动窗口）
+    final now = DateTime.now();
     final path = Path();
-    for (var i = 0; i < n; i++) {
-      final x = n == 1 ? padL + chartW : padL + chartW * i / (n - 1);
-      final v = pts[i].clamp(bottom.toInt(), top.toInt()).toDouble();
+    var first = true;
+    for (final s in values) {
+      final age = now.difference(s.t).inMilliseconds / 1000.0;
+      if (age > windowSec) continue;
+      final x = padL + chartW * (1 - age / windowSec);
+      final v = s.v.clamp(bottom.toInt(), top.toInt()).toDouble();
       final y = padT + (top - v) / (top - bottom) * chartH;
-      if (i == 0) {
+      if (first) {
         path.moveTo(x, y);
+        first = false;
       } else {
         path.lineTo(x, y);
       }
@@ -520,5 +729,5 @@ class _RssiPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _RssiPainter old) => true; // values 是原地追加的同一个 List，必须每帧重绘
+  bool shouldRepaint(covariant _RssiPainter old) => true; // 每 1 秒 setState 重绘
 }

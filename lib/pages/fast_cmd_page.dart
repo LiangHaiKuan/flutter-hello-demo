@@ -645,13 +645,7 @@ class _FastCmdPageState extends State<FastCmdPage> {
         leading: BackButton(onPressed: () => Navigator.of(context).pop()),
         title: const Text('自定义按键'),
         actions: [
-          TextButton(
-              onPressed: () {
-                setState(() => _editMode = !_editMode);
-                _selected.clear();
-              },
-              child: Text(_editMode ? '取消' : '编辑',
-                  style: const TextStyle(color: Colors.white))),
+          // 编辑按钮已挪进右上角三点菜单（v1.5）
           IconButton(
               icon: const Icon(Icons.more_vert, color: Colors.white),
               tooltip: '更多',

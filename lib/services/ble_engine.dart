@@ -260,6 +260,7 @@ class DeviceSession {
       sub.cancel();
     }
     notifyBump.dispose();
+    autoFeatureMatched.dispose();
     state.dispose();
     rssi.dispose();
     servicesReady.dispose();
@@ -361,6 +362,14 @@ class BleEngine {
       }
     }
     loadCmds();
+  }
+
+  Future<void> saveAutoFeature() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool('auto_feature_enabled', autoFeatureEnabled);
+    await sp.setString('auto_feat_service', autoFeatServiceUuid);
+    await sp.setString('auto_feat_write', autoFeatWriteUuid);
+    await sp.setString('auto_feat_notify', autoFeatNotifyUuid);
   }
 
   Future<void> saveLogFormat() async {
@@ -571,6 +580,12 @@ class BleEngine {
   void clearLogs() {
     logs.value = [];
   }
+}
+
+class RssiSample {
+  final DateTime t;
+  final int v;
+  RssiSample(this.t, this.v);
 }
 
 /// UUID 缩写：取后 4 位，如 ffe1

@@ -108,6 +108,10 @@ class _FloatingLogWindowState extends State<_FloatingLogWindow> {
                                 fontWeight: FontWeight.w600)),
                       ),
                       _barBtn(Icons.copy, '复制全部', _copyAll),
+                      // 清空日志（v1.5）
+                      _barBtn(Icons.delete_sweep, '清空', () {
+                        BleEngine.instance.clearLogs();
+                      }),
                       // 右上角：关闭
                       _barBtn(Icons.close, '关闭', () => FloatingLog.instance.hide()),
                     ],

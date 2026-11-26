@@ -33,6 +33,7 @@ class _DevicePageState extends State<DevicePage> {
   DateTime? _translateSnapshot; // 翻译只作用于点击时刻之前的日志
   _WriteType _writeType = _WriteType.defaultWrite;
   bool _loopSend = false;
+  TabController? _tabCtl;
   final TextEditingController _sendCtl = TextEditingController();
   final TextEditingController _delayCtl = TextEditingController(text: '10');
   final TextEditingController _filterCtl = TextEditingController();
@@ -42,9 +43,18 @@ class _DevicePageState extends State<DevicePage> {
   @override
   void initState() {
     super.initState();
+    _tabCtl = TabController(length: 2, vsync: this);
     _session = _engine.sessionOf(widget.mac);
     _engine.sessionsBump.addListener(_onSessionsChanged);
     _session?.state.addListener(_onSessionsChanged);
+    // 自动特征匹配成功 → 直接跳到实时日志页
+    _session?.autoFeatureMatched.addListener(_onAutoFeature);
+  }
+
+  void _onAutoFeature() {
+    if (mounted && _session!.autoFeatureMatched.value) {
+      _tabCtl?.animateTo(1);
+    }
   }
 
   void _onSessionsChanged() {
@@ -55,6 +65,8 @@ class _DevicePageState extends State<DevicePage> {
   void dispose() {
     _engine.sessionsBump.removeListener(_onSessionsChanged);
     _session?.state.removeListener(_onSessionsChanged);
+    _session?.autoFeatureMatched.removeListener(_onAutoFeature);
+    _tabCtl?.dispose();
     _loopTimer?.cancel();
     _sendCtl.dispose();
     _delayCtl.dispose();
@@ -232,46 +244,71 @@ class _DevicePageState extends State<DevicePage> {
                     ],
                   ),
                 )
-              : ListView(
-                  shrinkWrap: true,
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: Text('自定义按键（点击发送）',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.edit,
-                          color: Color(0xFFF57C00)),
-                      title: const Text('编辑命令（增删改 / 导入导出 / 云端）'),
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const FastCmdPage()));
-                      },
-                    ),
-                    for (final c in engine.cmds.where((c) => c.enabled))
-                      ListTile(
-                        dense: true,
-                        title: Text(c.name),
-                        subtitle: Text(c.preview(),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontFamily: 'monospace', fontSize: 12)),
-                        onTap: () async {
-                          final bytes = HexUtil.parse(c.data,
-                              c.hexMode ? TextCodec.hex : TextCodec.ascii);
-                          if (bytes == null) {
-                            _toast('命令数据格式错误: ${c.name}');
-                            return;
-                          }
-                          await session.send(bytes, false);
-                        },
+              // 对标原版格式：标题行"自定义按键"+ 编辑链接 + 右上角关闭，
+              // 下面是橙色按键块网格（只显示命令名，点击即发送）
+              : Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Text('自定义按键',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.bold)),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                      builder: (_) => const FastCmdPage()));
+                            },
+                            child: const Text('编辑',
+                                style:
+                                    TextStyle(color: Color(0xFFF57C00))),
+                          ),
+                        ],
                       ),
-                  ],
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final c in engine.cmds.where((c) => c.enabled))
+                            GestureDetector(
+                              onTap: () async {
+                                final bytes = HexUtil.parse(c.data,
+                                    c.hexMode ? TextCodec.hex : TextCodec.ascii);
+                                if (bytes == null) {
+                                  _toast('命令数据格式错误: ${c.name}');
+                                  return;
+                                }
+                                await session.send(bytes, false);
+                              },
+                              child: Container(
+                                constraints: const BoxConstraints(
+                                    minWidth: 88, maxWidth: 140),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF57C00),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(c.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                        color: Colors.white, fontSize: 14)),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
         ),
       ),
@@ -667,9 +704,7 @@ class _DevicePageState extends State<DevicePage> {
         final ok = await _confirmExit();
         if (ok && context.mounted) Navigator.of(context).pop();
       },
-      child: DefaultTabController(
-        length: 2,
-        child: Scaffold(
+      child: Scaffold(
           appBar: AppBar(
             leading: BackButton(
                 onPressed: () async {
@@ -717,6 +752,37 @@ class _DevicePageState extends State<DevicePage> {
                     ),
                   );
                 },
+              ),
+              // 销毁按钮：断开 + 移除会话（活动连接列表里也会消失）
+              TextButton(
+                onPressed: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('销毁该设备'),
+                      content: const Text(
+                          '将断开连接并从「活动连接」列表中移除该设备（会话销毁，'
+                          '回连需重新扫描）。确定？'),
+                      actions: [
+                        TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('取消')),
+                        ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.redAccent,
+                                foregroundColor: Colors.white),
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text('销毁')),
+                      ],
+                    ),
+                  );
+                  if (ok != true) return;
+                  await session.disconnect();
+                  _engine.removeSession(session);
+                  if (context.mounted) Navigator.of(context).pop();
+                },
+                child: const Text('销毁',
+                    style: TextStyle(color: Colors.redAccent)),
               ),
               IconButton(
                 icon: const Icon(Icons.more_vert, color: Colors.white),
@@ -798,7 +864,6 @@ class _DevicePageState extends State<DevicePage> {
             },
           ),
           bottomNavigationBar: _buildSendBar(),
-        ),
       ),
     );
   }
@@ -816,7 +881,10 @@ class _DevicePageState extends State<DevicePage> {
           ignoring: !connected,
           child: Opacity(
             opacity: connected ? 1.0 : 0.45,
-            child: Column(
+            // SafeArea：适配带手势导航条/三大件的全面屏，避免被系统栏压住
+            child: SafeArea(
+              top: false,
+              child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
@@ -830,9 +898,11 @@ class _DevicePageState extends State<DevicePage> {
                           controller: _sendCtl,
                           enabled: connected,
                           style: const TextStyle(fontSize: 14),
+                          maxLines: 1,
                           decoration: const InputDecoration(
                             isDense: true,
-                            hintText: '数据格式: aa00bb11cc22（支持空格）',
+                            // 单行显示，缩短提示避免换行；完整格式说明见下方小字
+                            hintText: 'aa00bb11cc22（支持空格）',
                             border: InputBorder.none,
                           ),
                         ),
@@ -841,7 +911,9 @@ class _DevicePageState extends State<DevicePage> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFFF57C00),
                           foregroundColor: Colors.white,
-                          minimumSize: const Size(56, 36),
+                          minimumSize: const Size(72, 44), // v1.5 加大更醒目
+                          textStyle: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                         onPressed: connected ? _sendOnce : null,
                         child: const Text('发送'),
@@ -939,6 +1011,7 @@ class _DevicePageState extends State<DevicePage> {
                   ),
                 ),
               ],
+            ),
             ),
           ),
         );

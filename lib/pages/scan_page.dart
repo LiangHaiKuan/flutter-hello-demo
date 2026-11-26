@@ -88,12 +88,14 @@ class _ScanPageState extends State<ScanPage> {
                 if (v == 'filter') _showFilterSettings();
                 if (v == 'conn') _showConnectSettings();
                 if (v == 'peripheral') _openPeripheralMode();
+                if (v == 'autofeat') _showAutoFeatureSettings();
                 if (v == 'log') FloatingLog.instance.toggle(context);
               },
               itemBuilder: (_) => const [
                 PopupMenuItem(value: 'scan', child: Text('扫描设置')),
                 PopupMenuItem(value: 'filter', child: Text('过滤设置')),
                 PopupMenuItem(value: 'conn', child: Text('连接设置')),
+                PopupMenuItem(value: 'autofeat', child: Text('自动特征')),
                 PopupMenuItem(value: 'peripheral', child: Text('外围模式')),
                 PopupMenuItem(value: 'log', child: Text('悬浮日志')),
               ],
@@ -174,7 +176,9 @@ class _ScanPageState extends State<ScanPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
+      // SafeArea：适配手势导航条，避免底部控件被系统栏压住
+      builder: (ctx) => SafeArea(
+        child: StatefulBuilder(
         builder: (ctx, setSheet) => Padding(
           padding: EdgeInsets.fromLTRB(
               16, 16, 16, MediaQuery.of(ctx).viewInsets.bottom + 16),
@@ -276,6 +280,7 @@ class _ScanPageState extends State<ScanPage> {
             ],
           ),
         ),
+        ),
       ),
     );
   }
@@ -356,25 +361,93 @@ class _AvailableTabState extends State<_AvailableTab> {
         return ValueListenableBuilder<int>(
           valueListenable: _engine.filterBump,
           builder: (_, ___, ____) {
-            final filtered = _engine.applyFilters(results);
-            if (filtered.isEmpty) {
-              return const Center(
-                child: Text('未发现设备，请确认设备已打开广播',
-                    style: TextStyle(color: Colors.grey)),
-              );
-            }
-            return ListView.separated(
-              itemCount: filtered.length,
-              separatorBuilder: (_, __) =>
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-              itemBuilder: (_, i) {
-                final r = filtered[i];
-                return _DeviceCard(result: r);
+            return ValueListenableBuilder<int>(
+              valueListenable: _engine.sessionsBump,
+              builder: (_, ____, _____) {
+                final filtered = _engine.applyFilters(results);
+                // 活动连接的设备置顶显示（它们可能不在广播列表里），按钮为"查看"
+                final seen = filtered.map((r) => r.device.remoteId.str).toSet();
+                final pinned = _engine.sessionList
+                    .where((s) => !seen.contains(s.mac))
+                    .toList();
+                if (filtered.isEmpty && pinned.isEmpty) {
+                  return const Center(
+                    child: Text('未发现设备，请确认设备已打开广播',
+                        style: TextStyle(color: Colors.grey)),
+                  );
+                }
+                // 下拉刷新：重新开始扫描
+                return RefreshIndicator(
+                  color: const Color(0xFFF57C00),
+                  onRefresh: () => _engine.startScan(),
+                  child: ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    itemCount: pinned.length + filtered.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(height: 1, indent: 16, endIndent: 16),
+                    itemBuilder: (_, i) {
+                      if (i < pinned.length) {
+                        final s = pinned[i];
+                        return _PinnedSessionCard(session: s);
+                      }
+                      final r = filtered[i - pinned.length];
+                      return _DeviceCard(result: r);
+                    },
+                  ),
+                );
               },
             );
           },
         );
       },
+    );
+  }
+}
+
+/// 活动连接置顶卡：显示"查看"按钮，点进去直接操作
+class _PinnedSessionCard extends StatelessWidget {
+  final DeviceSession session;
+  const _PinnedSessionCard({required this.session});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      elevation: 1,
+      color: const Color(0xFFFFF6EE),
+      child: ValueListenableBuilder<BluetoothConnectionState>(
+        valueListenable: session.state,
+        builder: (_, st, ___) {
+          final connected = st == BluetoothConnectionState.connected;
+          final connecting = st == BluetoothConnectionState.connecting;
+          return ListTile(
+            leading: Icon(
+              connected ? Icons.link : Icons.link_off,
+              color: connected ? Colors.green : Colors.grey,
+            ),
+            title: Text(session.name,
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+            subtitle: Text(
+                '${session.mac} · ${connected ? "已连接" : (connecting ? "连接中" : "已断开")}',
+                style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            trailing: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFF57C00),
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              ),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => DevicePage(mac: session.mac, name: session.name),
+              )),
+              child: const Text('查看'),
+            ),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => DevicePage(mac: session.mac, name: session.name),
+            )),
+          );
+        },
+      ),
     );
   }
 }
@@ -400,75 +473,50 @@ class _DeviceCard extends StatelessWidget {
 
     final session = engine.sessions[mac];
 
+    // 卡片结构（v1.5 重排）：第一行 = 完整设备名独占一行；
+    // 第二行 = MAC · 信号强度 · 广播数据按钮 · 连接按钮。
+    // 原 44x44 "BLE" 方块图标仅装饰（广播数据另有柱状图入口），已去掉，把空间留给名称。
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       elevation: 1,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 点图标 → 广播数据页
-            GestureDetector(
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => AdvDataPage(mac: mac, name: name),
-              )),
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF57C00).withAlpha(35),
-                  borderRadius: BorderRadius.circular(8),
+            // 第一行：完整设备名（太长自动省略号）
+            Text(name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87)),
+            const SizedBox(height: 4),
+            // 第二行：MAC · RSSI · 广播数据 · 连接
+            Row(
+              children: [
+                Expanded(
+                  child: Text(mac,
+                      style: const TextStyle(
+                          fontSize: 12, color: Colors.grey)),
                 ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.bluetooth,
-                        color: Color(0xFFF57C00), size: 20),
-                    Text('BLE',
-                        style: TextStyle(
-                            color: Colors.orange.shade700,
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold)),
-                  ],
+                Text('${result.rssi} dBm',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(width: 4),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.bar_chart,
+                      size: 20, color: Colors.grey),
+                  tooltip: '广播数据',
+                  onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                          builder: (_) => AdvDataPage(mac: mac, name: name))),
                 ),
-              ),
+                const SizedBox(width: 4),
+                _connectButton(context, engine, session, dev, mac, name),
+              ],
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: GestureDetector(
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => AdvDataPage(mac: mac, name: name),
-                )),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87)),
-                    const SizedBox(height: 2),
-                    Text(mac,
-                        style:
-                            const TextStyle(fontSize: 12, color: Colors.grey)),
-                  ],
-                ),
-              ),
-            ),
-            Text('${result.rssi} dBm',
-                style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            const SizedBox(width: 8),
-            IconButton(
-              icon: const Icon(Icons.bar_chart, size: 20, color: Colors.grey),
-              tooltip: '广播数据',
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => AdvDataPage(mac: mac, name: name),
-              )),
-            ),
-            // 连接/进入/回连按钮（实时反映连接状态）
-            _connectButton(context, engine, session, dev, mac, name),
           ],
         ),
       ),
@@ -581,8 +629,8 @@ class _ActiveTab extends StatelessWidget {
                         style: TextStyle(
                             fontSize: 12,
                             color: connected
-                                ? Colors.grey
-                                : Colors.grey.shade400)),
+                                ? Colors.grey.shade400 // v1.5 变浅，降低对比度
+                                : Colors.grey.shade300)),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
