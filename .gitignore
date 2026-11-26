@@ -17,6 +17,7 @@ android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
 android/key.properties
 *.jks
 *.keystore
+!ci/debug.keystore
 
 # 系统垃圾
 .DS_Store

@@ -116,15 +116,12 @@ class _DevicePageState extends State<DevicePage> with TickerProviderStateMixin {
         .showSnackBar(SnackBar(content: Text(msg), duration: const Duration(milliseconds: 800)));
   }
 
-  /// hex 翻译开关：点一下翻译当前日志，再点还原；新收数据不自动翻译
-  void _setTranslate(bool v) {
+  /// hex 翻译：点一下翻译当前日志（到点击时刻为止）；新收数据不自动翻译；
+  /// 再点一下把新收到的部分也翻译（不是开关，不需要先关再开）
+  void _setTranslate() {
     setState(() {
-      _translate = v;
-      if (v) {
-        _translateSnapshot = DateTime.now();
-      } else {
-        _translateSnapshot = null;
-      }
+      _translate = true;
+      _translateSnapshot = DateTime.now();
     });
   }
 
@@ -273,39 +270,45 @@ class _DevicePageState extends State<DevicePage> with TickerProviderStateMixin {
                         ],
                       ),
                       const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final c in engine.cmds.where((c) => c.enabled))
-                            GestureDetector(
-                              onTap: () async {
-                                final bytes = HexUtil.parse(c.data,
-                                    c.hexMode ? TextCodec.hex : TextCodec.ascii);
-                                if (bytes == null) {
-                                  _toast('命令数据格式错误: ${c.name}');
-                                  return;
-                                }
-                                await session.send(bytes, false);
-                              },
-                              child: Container(
-                                constraints: const BoxConstraints(
-                                    minWidth: 88, maxWidth: 140),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 10),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF57C00),
-                                  borderRadius: BorderRadius.circular(6),
+                      // v1.6：按键太多时窗口会撑爆屏幕 —— 限高为屏幕一半，超出部分滚动
+                      SizedBox(
+                        height: MediaQuery.of(ctx).size.height * 0.45,
+                        child: SingleChildScrollView(
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final c in engine.cmds.where((c) => c.enabled))
+                                GestureDetector(
+                                  onTap: () async {
+                                    final bytes = HexUtil.parse(c.data,
+                                        c.hexMode ? TextCodec.hex : TextCodec.ascii);
+                                    if (bytes == null) {
+                                      _toast('命令数据格式错误: ${c.name}');
+                                      return;
+                                    }
+                                    await session.send(bytes, false);
+                                  },
+                                  child: Container(
+                                    constraints: const BoxConstraints(
+                                        minWidth: 88, maxWidth: 140),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF57C00),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(c.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(
+                                            color: Colors.white, fontSize: 14)),
+                                  ),
                                 ),
-                                child: Text(c.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 14)),
-                              ),
-                            ),
-                        ],
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -426,24 +429,14 @@ class _DevicePageState extends State<DevicePage> with TickerProviderStateMixin {
                     MaterialPageRoute(builder: (_) => const FastCmdPage()));
               },
             ),
-            // 翻译开关（从日志工具栏挪过来，避免把那行撑出溢出警告）
+            // hex 翻译：单击动作（不是开关）——点一次翻译一次当前日志
             ListTile(
               leading: const Icon(Icons.translate, color: Color(0xFFF57C00)),
               title: const Text('hex翻译（接收区）'),
-              subtitle: Text(_translate
-                  ? '已开启：hex 解析成文本（再点还原，新数据不自动翻）'
-                  : '仅 hex 格式下可用，点一下翻译当前日志'),
-              trailing: Switch(
-                value: _translate && _codec == TextCodec.hex,
-                activeColor: const Color(0xFFF57C00),
-                onChanged: (v) {
-                  Navigator.pop(ctx);
-                  _setTranslate(v);
-                },
-              ),
+              subtitle: const Text('点一下翻译当前日志；新收的数据再点一下才翻译'),
               onTap: () {
                 Navigator.pop(ctx);
-                _setTranslate(!_translate);
+                _setTranslate();
               },
             ),
             ListTile(
@@ -828,7 +821,7 @@ class _DevicePageState extends State<DevicePage> with TickerProviderStateMixin {
                             filterCtl: _filterCtl,
                             logScroll: _logScroll,
                             onFormat: (v) => setState(() => _codec = v),
-                            onTranslate: () => _setTranslate(!_translate),
+                            onTranslate: _setTranslate,
                           ),
                         ],
                       ),
@@ -913,9 +906,8 @@ class _DevicePageState extends State<DevicePage> with TickerProviderStateMixin {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFFF57C00),
                           foregroundColor: Colors.white,
-                          minimumSize: const Size(72, 44), // v1.5 加大更醒目
-                          textStyle: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold),
+                          minimumSize: const Size(56, 36), // v1.6 缩回 v1.4 尺寸
+                          textStyle: const TextStyle(fontSize: 14),
                         ),
                         onPressed: connected ? _sendOnce : null,
                         child: const Text('发送'),
@@ -939,7 +931,7 @@ class _DevicePageState extends State<DevicePage> with TickerProviderStateMixin {
                         children: [
                           _iconBtn(Icons.history, '发送历史', _showHistory),
                           const SizedBox(width: 12),
-                          _iconBtn(Icons.bolt, '自定义按键', _showFastCmdSheet),
+                          _iconBtn(Icons.grid_view, '自定义按键', _showFastCmdSheet),
                           const SizedBox(width: 12),
                           DropdownButton<TextCodec>(
                             value: _codec,

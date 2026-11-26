@@ -5,6 +5,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../services/ble_engine.dart';
+import '../core/version.dart';
 import '../widgets/log_floating.dart';
 import 'adv_data_page.dart';
 import 'device_page.dart';
@@ -98,6 +99,7 @@ class _ScanPageState extends State<ScanPage> {
                 PopupMenuItem(value: 'autofeat', child: Text('自动特征')),
                 PopupMenuItem(value: 'peripheral', child: Text('外围模式')),
                 PopupMenuItem(value: 'log', child: Text('悬浮日志')),
+                PopupMenuItem(value: 'changelog', child: Text('更新内容 (v1.6)')),
               ],
             ),
           ],
@@ -744,6 +746,38 @@ class _ActiveTab extends StatelessWidget {
                                     : const Color(0xFFF57C00)),
                           ),
                         ),
+                        // v1.6：销毁按钮——断开并移除会话，活动连接列表里直接消失
+                        if (connected)
+                          TextButton(
+                            onPressed: () async {
+                              final ok = await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('销毁该设备'),
+                                  content: const Text(
+                                      '将断开连接并从「活动连接」列表中移除（回连需重新扫描）。确定？'),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, false),
+                                        child: const Text('取消')),
+                                    ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.redAccent,
+                                            foregroundColor: Colors.white),
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, true),
+                                        child: const Text('销毁')),
+                                  ],
+                                ),
+                              );
+                              if (ok != true) return;
+                              await s.disconnect();
+                              BleEngine.instance.removeSession(s);
+                            },
+                            child: const Text('销毁',
+                                style: TextStyle(color: Colors.redAccent)),
+                          ),
                       ],
                     ),
                     onTap: () => Navigator.of(context).push(MaterialPageRoute(

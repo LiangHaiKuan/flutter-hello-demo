@@ -1,11 +1,19 @@
 @echo off
-title install apk
+chcp 65001 >nul
+title 安装 APK 到手机
+set ADB=E:\tools\platform-tools\adb.exe
+
 if "%~1"=="" (
-  echo drag an APK file onto this bat icon
-  pause
-  exit /b
+    echo 用法：把 apk 文件拖到这个 bat 文件上即可安装
+    echo.
+    echo 当前连接的设备：
+    "%ADB%" devices
+    pause
+    exit /b
 )
-echo installing: %~nx1
-"E:\tools\platform-tools\adb.exe" install -r "%~1"
-echo ====== install done, open app on phone, then run 1-�鿴��־.bat ======
+
+echo 正在安装：%~1
+"%ADB%" install -r "%~1"
+echo.
+echo 安装结束，请到手机上打开「BLE调试助手」
 pause

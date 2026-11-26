@@ -118,14 +118,14 @@ class _AdvDataPageState extends State<AdvDataPage> {
         len: 3,
         type: 0x01,
         value: [flagsVal],
-        note: 'Flags'));
+        note: 'Flags · 标志位'));
     // 完整设备名（0x09）
     if (adv.advName.isNotEmpty) {
       list.add(_AdStruct(
           len: adv.advName.length + 1,
           type: 0x09,
           value: adv.advName.codeUnits,
-          note: 'Complete Local Name'));
+          note: 'Complete Local Name · 完整设备名'));
     }
     if (adv.txPowerLevel != null) {
       list.add(_AdStruct(
@@ -154,31 +154,31 @@ class _AdvDataPageState extends State<AdvDataPage> {
           len: b.length + data.length + 1,
           type: 0x16,
           value: [...b, ...data],
-          note: 'Service Data'));
+          note: 'Service Data · 服务数据'));
     });
     adv.manufacturerData.forEach((id, data) {
       list.add(_AdStruct(
           len: data.length + 3,
           type: 0xFF,
           value: [id & 0xFF, (id >> 8) & 0xFF, ...data],
-          note: 'Manufacturer Data'));
+          note: 'Manufacturer Data · 厂商自定义数据'));
     });
     return list;
   }
 
   String _typeName(int t) {
     const names = {
-      0x01: 'Flags',
+      0x01: 'Flags · 标志位',
       0x02: 'Incomplete 16b UUIDs',
       0x03: 'Complete 16b UUIDs',
       0x06: 'Incomplete 128b UUIDs',
       0x07: 'Complete 128b UUIDs',
-      0x08: 'Shortened Local Name',
-      0x09: 'Complete Local Name',
-      0x0A: 'Tx Power Level',
-      0x16: 'Service Data - 16b UUID',
-      0x19: 'Appearance',
-      0xFF: 'Manufacturer Data',
+      0x08: 'Shortened Local Name · 缩写设备名',
+      0x09: 'Complete Local Name · 完整设备名',
+      0x0A: 'Tx Power Level · 发射功率',
+      0x16: 'Service Data · 服务数据',
+      0x19: 'Appearance · 外观标识',
+      0xFF: 'Manufacturer Data · 厂商自定义数据',
     };
     return names[t] ?? 'Unknown (0x${t.toRadixString(16).padLeft(2, '0')})';
   }
@@ -315,11 +315,63 @@ class _AdvDataPageState extends State<AdvDataPage> {
           const SizedBox(height: 6),
           _buildTranslateTable(adv),
           const SizedBox(height: 16),
+          // ---------- v1.6：TYPE 字段中文含义对照（跟在字符串翻译视图下面） ----------
+          const Text('字段含义（中文对照）:',
+              style: TextStyle(fontSize: 14, color: Colors.black54)),
+          const SizedBox(height: 6),
+          _buildFieldMeaningBox(),
+          const SizedBox(height: 16),
           // ---------- Flags 逐位含义（TYPE=0x01） ----------
           _buildFlagsSection(adv),
           const SizedBox(height: 16),
           // ---------- 广播包解读（面向初学者的白话总结） ----------
           _buildSummarySection(adv),
+        ],
+      ),
+    );
+  }
+
+  // ---------- v1.6：TYPE 字段中文含义对照表 ----------
+  Widget _buildFieldMeaningBox() {
+    const rows = [
+      ('Flags', '标志位（设备能力：可否连接、是否支持经典蓝牙）'),
+      ('Complete Local Name', '完整设备名（广播里的蓝牙名称）'),
+      ('Shortened Local Name', '缩写设备名（放不下完整名时的缩写）'),
+      ('Service Data', '服务数据（随广播附带的服务数据，如 iBeacon）'),
+      ('Manufacturer Data', '厂商自定义数据（厂家自己定义的内容）'),
+      ('Service UUID', '服务 UUID 列表（设备支持的服务）'),
+      ('Tx Power Level', '发射功率（信号强度参考）'),
+      ('Appearance', '外观标识（设备图标类别）'),
+    ];
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8F0),
+        border: Border.all(color: Colors.orange.shade200),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final (en, cn) in rows)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text.rich(
+                TextSpan(
+                  style: const TextStyle(fontSize: 12),
+                  children: [
+                    TextSpan(
+                        text: en,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFFF57C00))),
+                    const TextSpan(text: '  =  '),
+                    TextSpan(text: cn),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );
