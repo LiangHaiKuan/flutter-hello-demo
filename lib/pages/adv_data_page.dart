@@ -267,9 +267,9 @@ class _AdvDataPageState extends State<AdvDataPage> {
           ),
           const SizedBox(height: 16),
           // ---------- 原始数据（v1.7：长按可复制） ----------
-          const Row(
+          Row(
             children: [
-              Text('原始数据（长按可复制）:',
+              const Text('原始数据（长按可复制）:',
                   style: TextStyle(fontSize: 14, color: Colors.black54)),
               const Spacer(),
               TextButton(
