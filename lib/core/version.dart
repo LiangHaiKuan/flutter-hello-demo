@@ -1,8 +1,15 @@
 /// 应用版本与更新内容（v1.6 起：每发一版 +0.1，并在「更新内容」里写清楚）
-const String appVersion = 'v1.7';
+const String appVersion = 'v1.8';
 
 /// 每一版的更新说明（新版本放前面，「更新内容」弹窗按此顺序展示）
 const List<Map<String, Object>> appChangelog = [
+  {
+    'version': 'v1.8',
+    'date': '2026-11-26',
+    'items': [
+      '设备卡第二行重新布局：MAC / 信号强度 / 广播包 均匀分布，连接按钮靠右并加大',
+    ],
+  },
   {
     'version': 'v1.7',
     'date': '2026-11-26',

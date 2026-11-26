@@ -100,7 +100,7 @@ class _ScanPageState extends State<ScanPage> {
                 PopupMenuItem(value: 'autofeat', child: Text('自动特征')),
                 PopupMenuItem(value: 'peripheral', child: Text('外围模式')),
                 PopupMenuItem(value: 'log', child: Text('悬浮日志')),
-                PopupMenuItem(value: 'changelog', child: Text('更新内容 (v1.7)')),
+                PopupMenuItem(value: 'changelog', child: Text('更新内容 (v1.8)')),
               ],
             ),
           ],
@@ -618,28 +618,35 @@ class _DeviceCard extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                     color: Colors.black87)),
             const SizedBox(height: 4),
-            // 第二行：MAC · RSSI · 广播包 · 连接（v1.7：MAC 不再 Expanded，RSSI 紧跟 MAC；柱状图图标改文字）
+            // 第二行（v1.8）：MAC / 信号强度 / 广播包 均匀分列，连接按钮靠右
             Row(
               children: [
-                Text(mac,
-                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                const SizedBox(width: 8),
-                Text('${result.rssi} dBm',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                const SizedBox(width: 4),
-                TextButton(
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('广播包',
-                      style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                          builder: (_) => AdvDataPage(mac: mac, name: name))),
+                Expanded(
+                  flex: 3,
+                  child: Text(mac,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
                 ),
-                const SizedBox(width: 4),
+                Expanded(
+                  flex: 2,
+                  child: Text('${result.rssi} dBm',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      alignment: Alignment.centerLeft,
+                    ),
+                    child: const Text('广播包',
+                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => AdvDataPage(mac: mac, name: name))),
+                  ),
+                ),
                 _connectButton(context, engine, session, dev, mac, name),
               ],
             ),
@@ -661,7 +668,8 @@ class _DeviceCard extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFF57C00),
           foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
         ),
         onPressed: () {
           engine.connect(dev);
@@ -681,7 +689,8 @@ class _DeviceCard extends StatelessWidget {
                 ? Colors.green
                 : (connecting ? Colors.grey : const Color(0xFFF57C00)),
             foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+            textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
           ),
           onPressed: connecting
               ? null
