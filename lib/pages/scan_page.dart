@@ -100,7 +100,7 @@ class _ScanPageState extends State<ScanPage> {
                 PopupMenuItem(value: 'autofeat', child: Text('自动特征')),
                 PopupMenuItem(value: 'peripheral', child: Text('外围模式')),
                 PopupMenuItem(value: 'log', child: Text('悬浮日志')),
-                PopupMenuItem(value: 'changelog', child: Text('更新内容 (v1.8)')),
+                PopupMenuItem(value: 'changelog', child: Text('更新内容 (v1.9)')),
               ],
             ),
           ],
