@@ -100,7 +100,7 @@ class _ScanPageState extends State<ScanPage> {
                 PopupMenuItem(value: 'autofeat', child: Text('自动特征')),
                 PopupMenuItem(value: 'peripheral', child: Text('外围模式')),
                 PopupMenuItem(value: 'log', child: Text('悬浮日志')),
-                PopupMenuItem(value: 'changelog', child: Text('更新内容 (v1.6)')),
+                PopupMenuItem(value: 'changelog', child: Text('更新内容 (v1.7)')),
               ],
             ),
           ],
@@ -618,22 +618,23 @@ class _DeviceCard extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                     color: Colors.black87)),
             const SizedBox(height: 4),
-            // 第二行：MAC · RSSI · 广播数据 · 连接
+            // 第二行：MAC · RSSI · 广播包 · 连接（v1.7：MAC 不再 Expanded，RSSI 紧跟 MAC；柱状图图标改文字）
             Row(
               children: [
-                Expanded(
-                  child: Text(mac,
-                      style: const TextStyle(
-                          fontSize: 12, color: Colors.grey)),
-                ),
+                Text(mac,
+                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(width: 8),
                 Text('${result.rssi} dBm',
                     style: const TextStyle(fontSize: 12, color: Colors.grey)),
                 const SizedBox(width: 4),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.bar_chart,
-                      size: 20, color: Colors.grey),
-                  tooltip: '广播数据',
+                TextButton(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('广播包',
+                      style: TextStyle(fontSize: 12, color: Colors.grey)),
                   onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(
                           builder: (_) => AdvDataPage(mac: mac, name: name))),

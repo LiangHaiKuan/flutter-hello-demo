@@ -266,10 +266,10 @@ class _AdvDataPageState extends State<AdvDataPage> {
             ),
           ),
           const SizedBox(height: 16),
-          // ---------- 原始数据 ----------
-          Row(
+          // ---------- 原始数据（v1.7：长按可复制） ----------
+          const Row(
             children: [
-              const Text('原始数据:',
+              Text('原始数据（长按可复制）:',
                   style: TextStyle(fontSize: 14, color: Colors.black54)),
               const Spacer(),
               TextButton(
@@ -285,35 +285,47 @@ class _AdvDataPageState extends State<AdvDataPage> {
               ),
             ],
           ),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade400),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              _rawHex(_assembleRaw(adv)),
-              style: const TextStyle(
-                  fontFamily: 'monospace', fontSize: 13, height: 1.4),
+          GestureDetector(
+            onLongPress: () =>
+                _copySection(context, _rawHex(_assembleRaw(adv)), '原始数据'),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.shade400),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                _rawHex(_assembleRaw(adv)),
+                style: const TextStyle(
+                    fontFamily: 'monospace', fontSize: 13, height: 1.4),
+              ),
             ),
           ),
           const SizedBox(height: 16),
           // ---------- 广播详内容表 ----------
-          const Text('广播详内容:',
+          const Text('广播详内容（长按可复制）:',
               style: TextStyle(fontSize: 14, color: Colors.black54)),
           const SizedBox(height: 6),
-          _buildTableWidget(adv),
+          GestureDetector(
+            onLongPress: () =>
+                _copySection(context, _tableText(adv), '广播详内容'),
+            child: _buildTableWidget(adv),
+          ),
           const SizedBox(height: 16),
           // ---------- 字符串翻译表（可打印字符绿色显示） ----------
-          const Text('字符串翻译视图:',
+          const Text('字符串翻译视图（长按可复制）:',
               style: TextStyle(fontSize: 14, color: Colors.black54)),
           const SizedBox(height: 2),
           const Text('可打印字符（0~9、a~Z、常用标点）翻译成字符用背景色标出，'
                   '无法翻译的字节保持十六进制',
               style: TextStyle(fontSize: 11, color: Colors.grey)),
           const SizedBox(height: 6),
-          _buildTranslateTable(adv),
+          GestureDetector(
+            onLongPress: () => _copySection(
+                context, _tableText(adv, translated: true), '字符串翻译视图'),
+            child: _buildTranslateTable(adv),
+          ),
           const SizedBox(height: 16),
           // ---------- v1.6：TYPE 字段中文含义对照（跟在字符串翻译视图下面） ----------
           const Text('字段含义（中文对照）:',
@@ -329,6 +341,32 @@ class _AdvDataPageState extends State<AdvDataPage> {
         ],
       ),
     );
+  }
+
+  // ---------- v1.7：长按复制整块文本 ----------
+  void _copySection(BuildContext ctx, String text, String label) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+        content: Text('$label 已复制'),
+        duration: const Duration(milliseconds: 800)));
+  }
+
+  /// 把解析表转成纯文本，供长按复制（translated=true 时附带可打印字符）
+  String _tableText(AdvertisementData? adv, {bool translated = false}) {
+    final rows = _buildTable(adv);
+    final b = StringBuffer()
+      ..writeln('LEN  TYPE  VALUE${translated ? ' (翻译)' : ''}');
+    for (final r in rows) {
+      String hex = _hex(r.value);
+      if (translated) {
+        final chars = String.fromCharCodes(
+            r.value.where((v) => v >= 0x20 && v <= 0x7E));
+        if (chars.isNotEmpty) hex = '$hex  [$chars]';
+      }
+      b.writeln(
+          '${r.len}  0x${r.type.toRadixString(16).padLeft(2, '0')}  $hex  ${r.note ?? _typeName(r.type)}');
+    }
+    return b.toString();
   }
 
   // ---------- v1.6：TYPE 字段中文含义对照表 ----------

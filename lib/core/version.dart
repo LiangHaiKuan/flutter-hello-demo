@@ -1,8 +1,16 @@
 /// 应用版本与更新内容（v1.6 起：每发一版 +0.1，并在「更新内容」里写清楚）
-const String appVersion = 'v1.6';
+const String appVersion = 'v1.7';
 
 /// 每一版的更新说明（新版本放前面，「更新内容」弹窗按此顺序展示）
 const List<Map<String, Object>> appChangelog = [
+  {
+    'version': 'v1.7',
+    'date': '2026-11-26',
+    'items': [
+      '设备卡信号强度左移，柱状图图标改为「广播包」文字按钮',
+      '广播数据页：原始数据、广播详内容、字符串翻译三块内容长按即可复制全文',
+    ],
+  },
   {
     'version': 'v1.6',
     'date': '2026-11-26',

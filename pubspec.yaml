@@ -1,7 +1,7 @@
 name: bletool
 description: "BLE 调试助手（Flutter 版）— 供硬件工程师日常调试 BLE 设备"
 publish_to: 'none'
-version: 1.6.0+16
+version: 1.7.0+17
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
