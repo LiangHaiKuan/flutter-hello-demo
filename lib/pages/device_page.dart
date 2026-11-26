@@ -25,7 +25,7 @@ class DevicePage extends StatefulWidget {
   State<DevicePage> createState() => _DevicePageState();
 }
 
-class _DevicePageState extends State<DevicePage> {
+class _DevicePageState extends State<DevicePage> with TickerProviderStateMixin {
   final BleEngine _engine = BleEngine.instance;
   DeviceSession? _session;
   TextCodec _codec = TextCodec.hex; // 发送/日志显示编码（hex/ascii/utf8/gbk）
@@ -790,7 +790,8 @@ class _DevicePageState extends State<DevicePage> {
                 onPressed: _showMoreMenu,
               ),
             ],
-            bottom: const TabBar(
+            bottom: TabBar(
+              controller: _tabCtl,
               indicatorColor: Colors.white,
               labelColor: Colors.white,
               unselectedLabelColor: Colors.white70,
@@ -810,6 +811,7 @@ class _DevicePageState extends State<DevicePage> {
                   child: Stack(
                     children: [
                       TabBarView(
+                        controller: _tabCtl,
                         children: [
                           _ServicesTab(
                             session: session,
@@ -1042,14 +1044,17 @@ class _DevicePageState extends State<DevicePage> {
         });
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        // v1.5 加大更醒目
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: BoxDecoration(
           color: selected ? const Color(0xFFF57C00) : Colors.grey.shade300,
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(6),
         ),
         child: Text(label,
-            style:
-                TextStyle(fontSize: 12, color: selected ? Colors.white : Colors.black54)),
+            style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: selected ? Colors.white : Colors.black54)),
       ),
     );
   }

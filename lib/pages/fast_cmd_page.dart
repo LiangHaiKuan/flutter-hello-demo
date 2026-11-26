@@ -10,6 +10,7 @@ import '../core/ble_util.dart';
 import '../core/notepad_client.dart';
 import '../models/models.dart';
 import '../services/ble_engine.dart';
+import '../widgets/log_floating.dart';
 
 /// 自定义按键：命令增删改、发送、导入导出（含云端同步）
 ///
@@ -66,7 +67,10 @@ class _FastCmdPageState extends State<FastCmdPage> {
                 decoration: InputDecoration(
                   labelText: hexMode ? '数据（hex，支持空格）' : '数据（ascii 文本）',
                 ),
-                maxLines: 2,
+                // 多行自适应：1 行内容显示 1 行高，最多撑到 4 行，再多内部滚动
+                minLines: 1,
+                maxLines: 4,
+                keyboardType: TextInputType.multiline,
               ),
               const SizedBox(height: 8),
               Row(
@@ -499,6 +503,18 @@ class _FastCmdPageState extends State<FastCmdPage> {
         child: ListView(
           shrinkWrap: true,
           children: [
+            // 编辑按钮从标题栏挪进三点菜单（v1.5）
+            ListTile(
+              leading: const Icon(Icons.edit, color: Color(0xFFF57C00)),
+              title: Text(_editMode ? '退出编辑模式' : '编辑模式（勾选/删除/拖动排序）'),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() {
+                  _editMode = !_editMode;
+                  _selected.clear();
+                });
+              },
+            ),
             const Padding(
               padding: EdgeInsets.all(12),
               child: Text('命令操作',
@@ -627,6 +643,20 @@ class _FastCmdPageState extends State<FastCmdPage> {
               onTap: () {
                 Navigator.pop(ctx);
                 _editCloudLinks();
+              },
+            ),
+            const Divider(),
+            ListTile(
+              leading: Icon(
+                Icons.picture_in_picture,
+                color: FloatingLog.instance.isShowing
+                    ? Colors.green
+                    : const Color(0xFFF57C00),
+              ),
+              title: const Text('悬浮日志'),
+              onTap: () {
+                Navigator.pop(ctx);
+                FloatingLog.instance.toggle(context);
               },
             ),
           ],

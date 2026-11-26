@@ -125,6 +125,88 @@ class _ScanPageState extends State<ScanPage> {
     ));
   }
 
+  // ---------- 自动特征：连接后自动点亮发送目标 + 开通知 + 跳实时日志 ----------
+  Future<void> _showAutoFeatureSettings() async {
+    final e = _engine;
+    final svcCtl = TextEditingController(text: e.autoFeatServiceUuid);
+    final writeCtl = TextEditingController(text: e.autoFeatWriteUuid);
+    final notifyCtl = TextEditingController(text: e.autoFeatNotifyUuid);
+    await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: const Text('自动特征'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                    '连接后若服务/特征 UUID 匹配，自动点亮发送目标、开启通知，'
+                    '并直接跳到实时日志页操作。',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('启用自动特征'),
+                  value: e.autoFeatureEnabled,
+                  activeColor: const Color(0xFFF57C00),
+                  onChanged: (v) => setD(() => e.autoFeatureEnabled = v),
+                ),
+                TextField(
+                  controller: svcCtl,
+                  style: const TextStyle(fontSize: 12),
+                  decoration: const InputDecoration(
+                    labelText: '服务 UUID（完整）',
+                    hintText: '0000ffe0-0000-1000-8000-00805f9b34fb',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (v) => e.autoFeatServiceUuid = v.trim(),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: writeCtl,
+                  style: const TextStyle(fontSize: 12),
+                  decoration: const InputDecoration(
+                    labelText: '发送目标特征 UUID（完整）',
+                    hintText: '0000ffe1-0000-1000-8000-00805f9b34fb',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (v) => e.autoFeatWriteUuid = v.trim(),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: notifyCtl,
+                  style: const TextStyle(fontSize: 12),
+                  decoration: const InputDecoration(
+                    labelText: '通知特征 UUID（完整）',
+                    hintText: '0000ffe2-0000-1000-8000-00805f9b34fb',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (v) => e.autoFeatNotifyUuid = v.trim(),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消')),
+            ElevatedButton(
+              onPressed: () {
+                e.saveAutoFeature();
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ---------- 扫描设置 ----------
   void _showScanSettings() {
     showModalBottomSheet(

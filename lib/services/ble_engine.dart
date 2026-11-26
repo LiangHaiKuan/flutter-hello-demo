@@ -106,6 +106,8 @@ class DeviceSession {
       servicesReady.value = true;
       BleEngine.instance.logEvent(mac, '连接成功，并成功发现服务');
       // 发送目标不自动点亮：由用户在蓝牙服务页点击选择（最新点击为准）
+      // ——除非扫描页三点菜单开了「自动特征」且 UUID 匹配
+      await _applyAutoFeature();
       _rssiTimer?.cancel();
       _rssiTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
         try {
@@ -116,6 +118,40 @@ class DeviceSession {
       BleEngine.instance.logEvent(mac, '发现服务失败: $e');
     }
   }
+
+  /// 自动特征：服务 UUID 匹配时，自动点亮发送目标特征 + 开启通知特征
+  Future<void> _applyAutoFeature() async {
+    final e = BleEngine.instance;
+    if (!e.autoFeatureEnabled) return;
+    bool uuidMatch(String a, String b) {
+      if (a.isEmpty || b.isEmpty) return false;
+      final x = a.toLowerCase().replaceAll('-', '');
+      final y = b.toLowerCase().replaceAll('-', '');
+      return x == y || x.endsWith(y) || y.endsWith(x);
+    }
+
+    for (final svc in services) {
+      if (!uuidMatch(svc.uuid.str, e.autoFeatServiceUuid)) continue;
+      autoFeatureMatched.value = true;
+      e.logEvent(mac, '自动特征：服务匹配 ${svc.uuid.str}');
+      for (final c in svc.characteristics) {
+        if (uuidMatch(c.uuid.str, e.autoFeatWriteUuid) &&
+            (c.properties.write || c.properties.writeWithoutResponse)) {
+          targetChar.value = c;
+          e.logEvent(mac, '自动特征：发送目标已点亮 ${shortUuid(c.uuid.str)}');
+        }
+        if (uuidMatch(c.uuid.str, e.autoFeatNotifyUuid) &&
+            (c.properties.notify || c.properties.indicate)) {
+          await setNotify(c, true);
+        }
+      }
+      return;
+    }
+    e.logEvent(mac, '自动特征：未找到匹配的服务 UUID，跳过');
+  }
+
+  /// 自动特征匹配成功（设备页监听它跳到实时日志 Tab）
+  final ValueNotifier<bool> autoFeatureMatched = ValueNotifier(false);
 
   void _onDisconnected() {
     _rssiTimer?.cancel();
@@ -283,8 +319,17 @@ class BleEngine {
   /// 每台设备最新一次广播（广播数据页用）
   final Map<String, ScanResult> latestResults = {};
 
-  /// 每台设备的 RSSI 历史曲线（广播数据页画图用）
-  final Map<String, List<int>> rssiHistory = {};
+  /// 每台设备的 RSSI 历史曲线（广播数据页画图用，带时间戳，滑窗 40 秒）
+  final Map<String, List<RssiSample>> rssiHistory = {};
+
+  void addRssiSample(String mac, int rssi) {
+    if (rssi < 0 && rssi >= -100) {
+      final h = rssiHistory.putIfAbsent(mac, () => []);
+      h.add(RssiSample(DateTime.now(), rssi));
+      final cutoff = DateTime.now().subtract(const Duration(seconds: 40));
+      h.removeWhere((s) => s.t.isBefore(cutoff));
+    }
+  }
 
   /// 过滤条件变化时 +1，通知扫描页重算
   final ValueNotifier<int> filterBump = ValueNotifier(0);
@@ -302,7 +347,7 @@ class BleEngine {
   String uuidFilter = '';
   bool onlyBle = true;
   bool onlyNamed = true;
-  int rssiThreshold = -50;
+  int rssiThreshold = -70; // 默认 -70（v1.5 由 -50 改）
 
   bool loopScan = false;
   int scanPeriodSec = 10;
@@ -320,6 +365,12 @@ class BleEngine {
   /// ---- 自定义按键云端同步链接（链接1/2/3...）----
   List<String> cloudLinks = ['https://notepad.1976f.com/LXHL/R4-7'];
 
+  /// ---- 自动特征（扫描页三点菜单设置）：连接后自动点亮发送目标 + 开通知 ----
+  bool autoFeatureEnabled = false;
+  String autoFeatServiceUuid = ''; // 完整服务 UUID
+  String autoFeatWriteUuid = ''; // 发送目标特征 UUID
+  String autoFeatNotifyUuid = ''; // 通知特征 UUID
+
   /// ---- 外围模式配置 ----
   String advLocalName = 'BLE调试助手';
   String advServiceUuid = '0000ff11-0000-1000-8000-00805f9b34fb';
@@ -334,6 +385,10 @@ class BleEngine {
   Future<void> loadSettings() async {
     final sp = await SharedPreferences.getInstance();
     autoReconnect = sp.getBool('auto_reconnect') ?? false;
+    autoFeatureEnabled = sp.getBool('auto_feature_enabled') ?? false;
+    autoFeatServiceUuid = sp.getString('auto_feat_service') ?? '';
+    autoFeatWriteUuid = sp.getString('auto_feat_write') ?? '';
+    autoFeatNotifyUuid = sp.getString('auto_feat_notify') ?? '';
     logShowTime = sp.getBool('log_show_time') ?? true;
     logShowTag = sp.getBool('log_show_tag') ?? true;
     logShowDir = sp.getBool('log_show_dir') ?? true;
@@ -468,13 +523,7 @@ class BleEngine {
         final mac = r.device.remoteId.str;
         map[mac] = r;
         latestResults[mac] = r;
-        // 只记录有效 RSSI（0 = 未知、127 = 读不到），避免曲线被无效值拉平
-        final rssi = r.rssi;
-        if (rssi < 0 && rssi >= -100) {
-          final h = rssiHistory.putIfAbsent(mac, () => []);
-          h.add(rssi);
-          if (h.length > 300) h.removeRange(0, h.length - 300);
-        }
+        BleEngine.instance.addRssiSample(mac, r.rssi);
       }
       final list = map.values.toList()
         ..sort((a, b) => b.rssi.compareTo(a.rssi));

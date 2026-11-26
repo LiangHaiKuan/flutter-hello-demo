@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+import '../core/ble_util.dart';
 import '../services/ble_engine.dart';
+import '../widgets/log_floating.dart';
+import 'device_page.dart';
 import 'knowledge_page.dart';
 
 /// 广播数据页（对标原版）：RSSI 曲线图 + 原始数据复制 + LEN/TYPE/VALUE 解析表 + 字符串翻译表
@@ -39,12 +42,7 @@ class _AdvDataPageState extends State<AdvDataPage> {
     if (_session != null && _session!.isConnected) {
       // 已连接设备：把 readRssi 的值也记进曲线历史
       _rssiListener = () {
-        final v = _session!.rssi.value;
-        if (v < 0 && v >= -100) { // 过滤无效值（0=未知），避免曲线被拉平
-          final h = _engine.rssiHistory.putIfAbsent(widget.mac, () => []);
-          h.add(v);
-          if (h.length > 300) h.removeRange(0, h.length - 300);
-        }
+        _engine.addRssiSample(widget.mac, _session!.rssi.value);
       };
       _session!.rssi.addListener(_rssiListener!);
     } else if (!_engine.scanning.value) {
@@ -77,6 +75,13 @@ class _AdvDataPageState extends State<AdvDataPage> {
       out.addAll(value);
     }
 
+    // Flags（0x01）：fbp 不给原始 flags，按 connectable 重组（可连接 0x06 / 不可连接 0x05）
+    final flagsVal = adv.connectable ? 0x06 : 0x05;
+    addStruct(0x01, [flagsVal]);
+    // 完整设备名（0x09）
+    if (adv.advName.isNotEmpty) {
+      addStruct(0x09, adv.advName.codeUnits);
+    }
     addStruct(0x0A, [adv.txPowerLevel != null ? adv.txPowerLevel! & 0xFF : 0]);
     if (adv.appearance != null && adv.appearance != 0) {
       final a = adv.appearance!;
@@ -178,10 +183,30 @@ class _AdvDataPageState extends State<AdvDataPage> {
     return names[t] ?? 'Unknown (0x${t.toRadixString(16).padLeft(2, '0')})';
   }
 
+  /// 直接连接广播设备（广播数据页内）
+  Future<void> _connectDevice(BuildContext ctx) async {
+    final r = _engine.latestResults[widget.mac];
+    if (r == null) {
+      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+          content: Text('还没有该设备的广播信息'),
+          duration: Duration(milliseconds: 800)));
+      return;
+    }
+    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+        content: Text('正在连接...'),
+        duration: Duration(milliseconds: 800)));
+    await _engine.connect(r.device);
+    if (mounted) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => DevicePage(mac: widget.mac, name: widget.name),
+      ));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final adv = _engine.latestResults[widget.mac]?.advertisementData;
-    final history = _engine.rssiHistory[widget.mac] ?? const <int>[];
+    final history = _engine.rssiHistory[widget.mac] ?? const <RssiSample>[];
 
     return Scaffold(
       appBar: AppBar(
